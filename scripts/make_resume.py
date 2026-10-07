@@ -107,6 +107,39 @@ def section_where(obs, ladder):
     return lines
 
 
+def channel_log_lines(obs):
+    """Where the last round's kernel and host logs are, when it had them.
+
+    The UART console alone cannot show a kernel that logs into RAM, and the machine's own
+    lines (what it modelled or refused) are not in the console either: a resumed session
+    that reads only the console would conclude there was nothing to see. A key that is
+    absent or null means the round had no such file, and nothing is printed for it.
+    """
+    chan = obs.get("channels") or {}
+    out = []
+    if obs.get("kernel_log"):
+        out.append(f"- 커널 로그 (메모리 덤프 채널, 게스트 증거, {esc(chan.get('kernel_lines', '?'))} 줄): "
+                   f"`{esc(obs.get('kernel_log'))}`")
+    if obs.get("host_log"):
+        out.append(f"- 호스트 로그 (머신이 한 말, 게스트 증거 아님, {esc(chan.get('host_lines', '?'))} 줄): "
+                   f"`{esc(obs.get('host_log'))}`")
+    # The task-line shape decides kernel_alive on the memory-dump channel. A resumed session
+    # must know when it was not the measured default: a refused shape (too loose) fell back to
+    # the default, and a custom one that matched every ring line was never shown to separate
+    # the bootloader's lines from the kernel's.
+    shape = obs.get("task_regex")
+    if isinstance(shape, dict):
+        rejected = shape.get("rejected")
+        if isinstance(rejected, dict) and rejected.get("pattern"):
+            out.append(f"- 커널 태스크 형식: 지정한 `{esc(rejected.get('pattern'))}` 은 너무 느슨해 쓰지 않았고 "
+                       f"기본 형식으로 판정했다 ({esc('; '.join(rejected.get('problems') or []))})")
+        elif shape.get("custom"):
+            out.append(f"- 커널 태스크 형식: 커스텀 `{esc(shape.get('pattern'))}` 로 판정했다"
+                       + (" (링의 모든 줄에 맞아 부트로더 줄과 커널 줄을 가르는지 확인되지 않음)"
+                          if shape.get("discriminates") is False else ""))
+    return out
+
+
 def section_why(obs):
     lines = ["## 2. 왜 거기서 멈췄나 — 마지막 지문", ""]
     if not obs:
@@ -127,8 +160,8 @@ def section_why(obs):
         f"- 최초 예외 블록: `{esc(obs.get('origin_block'))}`",
         f"- 콘솔: `{esc(obs.get('console'))}`",
         f"- 트레이스: `{esc(obs.get('trace'))}`",
-        "",
     ]
+    lines += channel_log_lines(obs) + [""]
     if obs.get("far") not in (None, "none"):
         lines += ["> 마지막 FAR/ELR (`%s` / `%s`) 은 **재귀의 위치이지 원인이 아닙니다.**"
                   % (esc(obs.get("far")), esc(obs.get("elr"))),

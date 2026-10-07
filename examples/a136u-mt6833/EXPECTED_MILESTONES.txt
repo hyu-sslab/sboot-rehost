@@ -1,0 +1,37 @@
+# SM-A136U (MT6833) 수동 실행에서 관측한 마일스톤 — 참조용. 값 차용 금지.
+#
+# 이 파일의 문자열은 이 펌웨어 빌드(A136USQSFDYJ1)가 낸 것이고, 다른 펌웨어의 토큰은 그 펌웨어의
+# 바이너리에서 static-analyzer 가 도출한다 (CLAUDE.md §3). 펌웨어 바이트는 담지 않았다.
+# 관측: 2026-10-05 재현 실행 1회 (키트 start.sh, Docker amd64). 바이트 단위 비교용 정답이 아니다.
+#
+# 데이터 줄 형식 (설계 C2): <milestone><TAB><token><TAB><channel>   channel = uart | memdump
+# 시각: uart 는 QEMU 시작 후 초, memdump 는 커널 시각 초 (괄호 안은 그 줄이 처음 보인 시작 후 초,
+#       스냅샷 해상도 약 12초의 상한).
+#
+# 주의:
+#  - verify_ok 줄은 검증을 우회한 상태에서 찍혔다 (reached_bypassed). 검증이 실제로 계산되었다는 뜻이 아니다.
+#  - EL3 모니터의 스테이지 진입에는 UART 증거가 없다. 트레이스의 진입 PC 로 확인한다.
+#  - kernel_alive 는 두 번째 메모리 덤프에서만 관측되었다 (링이 한 바퀴 돌기 전에 덤프가 찍혔을 때만).
+#  - 커널은 UART 에 아무것도 내지 않는다. 원인은 미확인이다.
+#  - surfaceflinger 와 Samsung bootchecker 재부팅은 이 실행에서 미도달이다 (F3 이후, 범위 밖).
+#
+# 시각 (이 실행): preloader_entry 0.4 s | medium_up 0.6 s | lk_entry 3.3 s | partitions 4.4 s |
+#   verify_ok 18.0 s | kernel_entry 19.4 s | kernel_alive 커널 0.0 s | partitions_up 커널 26.2 s (60.7 s) |
+#   userspace 커널 98.8 s (123.9 s) | super_mounted 커널 101.5 s (123.9 s)
+preloader_entry	PL_LOG_STORE	uart
+medium_up	[SD0] Initialized, eMMC45	uart
+lk_entry	[BLDR] jump to 0x48200000	uart
+lk_entry	[LK] segment = 0x2	uart
+partitions	[GPT_LK]Success to find valid GPT.	uart
+verify_ok	SECURE : Signature verification succeed (boot)	uart
+kernel_entry	jump to K64	uart
+kernel_alive	Linux version 4.14.186-27210951	memdump
+kernel_alive	Freeing unused kernel memory	memdump
+kernel_alive	Kernel_init_done	memdump
+partitions_up	mmcblk0: p1 p2	memdump
+userspace	init: init first stage started!	memdump
+super_mounted	[libfs_mgr]Created logical partition system on device /dev/block/dm-0	memdump
+#
+# 이 실행의 그 밖의 관측 (F3 이후, 참고): "Switching root to '/system'" 커널 106.6 s, "init second stage started!"
+#   커널 171.1 s, "Loading SELinux policy" 커널 169.7 s, "starting service 'zygote'" 커널 390.7 s.
+#   "starting service 'surfaceflinger'" 와 "Restarting system with command 'bootchecker'" 는 미도달.

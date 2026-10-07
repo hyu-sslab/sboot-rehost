@@ -814,10 +814,6 @@ def render(workdir, data):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir")
-    # Accepted and ignored: the track number is read from INPUT.md like every
-    # other slot. Kept so a caller written for the two-track era still runs, and
-    # unconstrained so the unified flow (which has no track) does not crash here.
-    parser.add_argument("--track", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--top", type=int, default=10,
                         help="how many entries the ranked tables show")
     args = parser.parse_args()

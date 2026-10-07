@@ -1,10 +1,23 @@
 /*
- * QEMU 벤더 스토리지 HCI 모델 — 골격
+ * QEMU 스토리지 HCI 모델 — Exynos UFS 골격 (UFS 전용. eMMC 에는 쓰지 않는다)
  * {{MACHINE_NAME}} 의 진짜 벤더 드라이버 (예: ufs-<soc>-core.ko) 를 구동시키기 위한
  * 플랫폼/sysbus MMIO 컨트롤러 + 디바이스 (PCI 아님).
  *
+ * ★ 이 파일은 한 Exynos UFS 부팅에서 나온 "골격"이다. 모양(3 계층, 표준 UFSHCI 흐름)만
+ *   가져오고 값은 가져오지 않는다:
+ *     - 벤더 창 이름(phy/uni/pcs/… 은 예시), 창 개수·오프셋, 상태 워드와 완료값,
+ *       기어·레인 수는 전부 "예시"다. 대상 드라이버의 관찰/역어셈블에서 도출한다 (박제 금지).
+ *     - 도출 전의 값은 {{...}} 자리표시자로 비워 두었다. 채우지 않으면 컴파일되지 않는다.
+ *       "모든 ready 비트"나 "all-ones" 를 미리 넣어 두지 않는다: 드라이버가 폴링하는 마스크와
+ *       기대값이 곧 그 값이고, 드라이버가 다르면 기다리는 값도 다르다.
+ *     - 표준 레지스터 오프셋·UIC/DME opcode·UPIU 형식은 JEDEC 표준이다. 대상이 표준을
+ *       따르는지는 확인한다 (벤더가 표준을 어기는 곳이 있다).
+ *     - 형·함수 이름(UfsHci · ufs_hci_*)은 이름표일 뿐이다. 환경변수 EUFS_LU_IMAGE · EUFS_LBS
+ *       는 export 키트와 knowledge/faults_storage.md 가 부르는 이름이라 그대로 둔다.
+ *   {{STORAGE_HCI_HEADER}} 는 이 파일이 쓰는 형(UfsHci · UfsHciWin · UFS_HCI_MEM_REGS)과
+ *   아래 함수들의 선언을 가진다 — Build 가 이 파일과 함께 쓴다.
+ *
  * 방법: 드라이버를 계측기로 삼는 관찰 루프 — knowledge/faults_storage.md.
- * 아래 값·오프셋·창 개수는 전부 대상 드라이버 관찰/역어셈블로 도출 (박제 금지).
  *
  * 3 계층: 레지스터 (표준+벤더창) / 트랜스포트 (링+도어벨+DMA) / 디바이스 (Query/SCSI).
  * 백킹: env EUFS_LU_IMAGE (디스크), EUFS_LBS (논리 블록크기 512|4096).
@@ -38,56 +51,59 @@
 #define DME_PEER_SET 0x04
 #define UIC_LINK_STARTUP 0x16
 
-static void eufs_raise(ExynosUfs *u,uint32_t bit){
+/* 비정적 함수의 선언은 헤더에 있다. 아래 정적 함수는 정의보다 먼저 불리므로 여기서 앞서 선언한다. */
+static void ufs_hci_process_utrd(UfsHci *u,int slot);
+
+static void ufs_hci_raise(UfsHci *u,uint32_t bit){
     u->reg[R_IS/4] |= bit; qemu_set_irq(u->irq,1); }
 
 /* ---- 레지스터 계층: 표준 ---- */
-static uint64_t eufs_mem_read(void *o,hwaddr off,unsigned sz){
-    EufsWin *w=o; ExynosUfs *u=w->u;
+static uint64_t ufs_hci_mem_read(void *o,hwaddr off,unsigned sz){
+    UfsHciWin *w=o; UfsHci *u=w->u;
     switch(off){
     case R_CAP: return {{HCI_CAP}};        /* nutrs/mcq 등 — 드라이버 기대값 */
     case R_VER: return {{HCI_VER}};        /* 예 0x0300 (3.0) */
-    case R_HCS: return 0x0000000f;         /* 모든 ready 비트 (§7.3 poll) */
-    default: return u->reg[(off/4)%EUFS_MEM_REGS];
+    case R_HCS: return {{HCS_READY_VALUE}}; /* 드라이버가 ready 로 폴링하는 비트 (§7.3 poll) — 마스크를 도출 */
+    default: return u->reg[(off/4)%UFS_HCI_MEM_REGS];
     }
 }
-static void eufs_mem_write(void *o,hwaddr off,uint64_t v,unsigned sz){
-    EufsWin *w=o; ExynosUfs *u=w->u;
+static void ufs_hci_mem_write(void *o,hwaddr off,uint64_t v,unsigned sz){
+    UfsHciWin *w=o; UfsHci *u=w->u;
     switch(off){
     case R_IS:  u->reg[R_IS/4] &= ~(uint32_t)v; qemu_set_irq(u->irq,0); return; /* W1C */
-    case R_UICCMD:  eufs_uiccmd(u,(uint32_t)v); return;
-    case R_UTRLDBR: eufs_ring_doorbell(u,(uint32_t)v); return;
-    default: u->reg[(off/4)%EUFS_MEM_REGS]=(uint32_t)v; return;
+    case R_UICCMD:  ufs_hci_uiccmd(u,(uint32_t)v); return;
+    case R_UTRLDBR: ufs_hci_ring_doorbell(u,(uint32_t)v); return;
+    default: u->reg[(off/4)%UFS_HCI_MEM_REGS]=(uint32_t)v; return;
     }
 }
 
 /* ---- 레지스터 계층: 벤더 창 관측값 (PHY cal done, gear 등) ---- */
-uint32_t eufs_vendor_val(ExynosUfs *u,const char *win,hwaddr off){
-    /* PHY 캘리브레이션 완료 폴링 -> all-1 (오프셋은 관찰로 도출) */
-    if(!strcmp(win,"phy") && (off & 0xfff)=={{PHY_CAL_DONE_OFF}}) return 0xffffffff;
+uint32_t ufs_hci_vendor_val(UfsHci *u,const char *win,hwaddr off){
+    /* PHY 캘리브레이션 완료 폴링 -> 드라이버의 폴링이 기다리는 값 (창 이름·오프셋·값은 관찰로 도출) */
+    if(!strcmp(win,"{{PHY_WIN_NAME}}") && (off & 0xfff)=={{PHY_CAL_DONE_OFF}}) return {{PHY_CAL_DONE_VALUE}};
     /* gear: 드라이버가 UIC 아닌 mmio 로 읽음 (.ko 역어셈블로 확정한 창+오프셋) */
-    if(!strcmp(win,"uni") && off=={{GEAR_OFF}}) return {{MAX_GEAR}};   /* 예 3 */
-    return 0;
+    if(!strcmp(win,"{{UNI_WIN_NAME}}") && off=={{GEAR_OFF}}) return {{MAX_GEAR}};   /* 예 3 */
+    return 0;   /* 모델링하지 않은 벤더 레지스터: 읽으면 0 — 드라이버가 접근하는 것만 관찰로 채운다 */
 }
-static uint64_t eufs_vendor_read(void *o,hwaddr off,unsigned sz){
-    EufsWin *w=o; return eufs_vendor_val(w->u,w->name,off); }
-static void eufs_vendor_write(void *o,hwaddr off,uint64_t v,unsigned sz){ }
+static uint64_t ufs_hci_vendor_read(void *o,hwaddr off,unsigned sz){
+    UfsHciWin *w=o; return ufs_hci_vendor_val(w->u,w->name,off); }
+static void ufs_hci_vendor_write(void *o,hwaddr off,uint64_t v,unsigned sz){ }
 
 /* ---- UIC/UniPro ---- */
-void eufs_uiccmd(ExynosUfs *u,uint32_t cmd){
+void ufs_hci_uiccmd(UfsHci *u,uint32_t cmd){
     uint32_t op=cmd & 0xff;
-    if(op==UIC_LINK_STARTUP){ eufs_raise(u,IS_UCCS); return; }
+    if(op==UIC_LINK_STARTUP){ ufs_hci_raise(u,IS_UCCS); return; }
     if(op==DME_GET||op==DME_PEER_GET){
-        u->reg[R_UCMDARG3/4]=eufs_unipro_attr(u->reg[R_UCMDARG1/4]>>16);
-        eufs_raise(u,IS_UCCS); return; }
+        u->reg[R_UCMDARG3/4]=ufs_hci_unipro_attr(u->reg[R_UCMDARG1/4]>>16);
+        ufs_hci_raise(u,IS_UCCS); return; }
     if(op==DME_SET||op==DME_PEER_SET){
         uint32_t attr=u->reg[R_UCMDARG1/4]>>16;
         if(attr=={{PA_PWRMODE_ATTR}}){ u->reg[R_HCS/4]|=(1u<<8); /* UPMCRS=1 */
-            eufs_raise(u,IS_UPMS); }                              /* ★ 전원모드 완료 */
-        eufs_raise(u,IS_UCCS); return; }
-    eufs_raise(u,IS_UCCS);
+            ufs_hci_raise(u,IS_UPMS); }                           /* ★ 전원모드 완료 */
+        ufs_hci_raise(u,IS_UCCS); return; }
+    ufs_hci_raise(u,IS_UCCS);
 }
-uint32_t eufs_unipro_attr(uint32_t attr){
+uint32_t ufs_hci_unipro_attr(uint32_t attr){
     /* PA_MaxRxHSGear/레인/granularity 등 — 드라이버 기대값 */
     switch(attr){ case {{PA_MAXRXHSGEAR}}: return {{MAX_GEAR}};
                   case {{PA_AVAILLANES}}:  return {{NUM_LANES}};
@@ -95,10 +111,10 @@ uint32_t eufs_unipro_attr(uint32_t attr){
 }
 
 /* ---- 트랜스포트: 도어벨 -> UTRD -> UPIU 분기 ---- */
-void eufs_ring_doorbell(ExynosUfs *u,uint32_t slots){
-    for(int i=0;i<{{NUM_SLOTS}};i++) if(slots&(1u<<i)) eufs_process_utrd(u,i);
+void ufs_hci_ring_doorbell(UfsHci *u,uint32_t slots){
+    for(int i=0;i<{{NUM_SLOTS}};i++) if(slots&(1u<<i)) ufs_hci_process_utrd(u,i);
 }
-static void eufs_process_utrd(ExynosUfs *u,int slot){
+static void ufs_hci_process_utrd(UfsHci *u,int slot){
     uint8_t d[32];
     dma_memory_read(&address_space_memory, {{UTRLBA}} + slot*32, d, 32, MEMTXATTRS_UNSPECIFIED);
     /* ★ 부호확장 함정 (§7.3): 넓히기 전 (uint32_t) 캐스트 */
@@ -107,41 +123,42 @@ static void eufs_process_utrd(ExynosUfs *u,int slot){
     dma_memory_read(&address_space_memory, ucd, upiu, sizeof(upiu), MEMTXATTRS_UNSPECIFIED);
     uint8_t ttype = upiu[0] & 0x3f;
     switch(ttype){
-    case 0x00: /* NOP OUT -> NOP_IN */ eufs_reply_nop(u,ucd); break;
-    case 0x16: eufs_handle_query(u,ucd,upiu); break;   /* Query */
-    case 0x01: eufs_handle_scsi(u,ucd,upiu); break;    /* SCSI cmd */
+    case 0x00: /* NOP OUT -> NOP_IN */ ufs_hci_reply_nop(u,ucd); break;
+    case 0x16: ufs_hci_handle_query(u,ucd,upiu); break;   /* Query */
+    case 0x01: ufs_hci_handle_scsi(u,ucd,upiu); break;    /* SCSI cmd */
     }
     u->reg[R_UTRLDBR/4] &= ~(1u<<slot);   /* 도어벨 자동 클리어 */
-    eufs_raise(u,IS_UTRCS);
+    ufs_hci_raise(u,IS_UTRCS);
 }
 
 /* ---- 디바이스: Query / SCSI (스텁 — 관찰 루프로 채움) ---- */
-void eufs_handle_query(ExynosUfs *u,uint64_t ucd,const uint8_t *upiu){
+void ufs_hci_handle_query(UfsHci *u,uint64_t ucd,const uint8_t *upiu){
     /* SET/READ FLAG fDeviceInit -> 0 (초기화 완료), READ DESCRIPTOR -> build_descriptor */
     /* 응답 UPIU data-seg length (byte10-11 big-endian) + tsf 스펙대로 */
 }
-void eufs_handle_scsi(ExynosUfs *u,uint64_t ucd,const uint8_t *upiu){
+void ufs_hci_handle_scsi(UfsHci *u,uint64_t ucd,const uint8_t *upiu){
     const uint8_t *cmd = upiu + {{CDB_OFF}};
     uint8_t lun = cmd[2];                 /* ★ LUN=byte2 (§7.3) */
     uint32_t edtl = (cmd[12]<<24)|(cmd[13]<<16)|(cmd[14]<<8)|cmd[15]; /* ★ EDTL=byte12-15 */
-    /* INQUIRY / READ CAPACITY / READ(10/16) / WRITE -> eufs_prdt_xfer */
+    /* INQUIRY / READ CAPACITY / READ(10/16) / WRITE -> ufs_hci_prdt_xfer */
     (void)lun; (void)edtl;
 }
-/* eufs_prdt_xfer: PRDT scatter-gather 따라 pread/pwrite(u->backing_fd) <-> 게스트 RAM */
+/* ufs_hci_prdt_xfer: PRDT scatter-gather 따라 pread/pwrite(u->backing_fd) <-> 게스트 RAM */
 
 /* ---- realize: 창 매핑 + 백킹 open ---- */
-void e2400_ufs_realize(ExynosUfs *u,MemoryRegion *sys,qemu_irq irq){
+void {{MODEL_LOWER}}_ufs_realize(UfsHci *u,MemoryRegion *sys,qemu_irq irq){
     u->irq=irq;
-    static const MemoryRegionOps std={ .read=eufs_mem_read,.write=eufs_mem_write,
+    static const MemoryRegionOps std={ .read=ufs_hci_mem_read,.write=ufs_hci_mem_write,
         .endianness=DEVICE_LITTLE_ENDIAN };
-    static const MemoryRegionOps ven={ .read=eufs_vendor_read,.write=eufs_vendor_write,
+    static const MemoryRegionOps ven={ .read=ufs_hci_vendor_read,.write=ufs_hci_vendor_write,
         .endianness=DEVICE_LITTLE_ENDIAN };
     /* 표준 창 + 벤더 창 N 개 (phy/uni/pcs/… — 드라이버가 접근하는 만큼) */
     /* memory_region_init_io(&u->mem_ufs, ... &std ... ) @ {{STORAGE_HCI_BASE}} */
     /* memory_region_init_io(&u->mem_phy, ... &ven ... ) @ base+{{PHY_WIN_OFF}} 등 */
 
     const char *img=getenv("EUFS_LU_IMAGE");
-    u->lbs = getenv("EUFS_LBS") ? atoi(getenv("EUFS_LBS")) : 4096;   /* ★ GPT 블록크기 일치 */
+    /* 논리 블록 크기: 합성 매체의 GPT 블록 크기와 같아야 한다 (lu_provenance.json 의 block_size) */
+    u->lbs = getenv("EUFS_LBS") ? atoi(getenv("EUFS_LBS")) : {{LU_BLOCK_SIZE}};   /* ★ GPT 블록크기 일치 */
     u->backing_fd = img ? open(img,O_RDONLY) : -1;
     if(u->backing_fd>=0){ off_t sz=lseek(u->backing_fd,0,SEEK_END); u->lu_size=sz; }
 }

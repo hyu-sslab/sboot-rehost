@@ -54,7 +54,9 @@ bash scripts/py.sh build_lu.py <workdir> --out <workdir>/fw/lu0.img
 - 부트로더는 파티션을 **이름으로** 조회한다. 지어낸 이름은 영원히 찾지 못한다
 - 실패가 한참 뒤 검증 오류나 조용한 다운로드 모드 진입으로 나타난다
 - 이름은 `lu_manifest.json` 에서 온다. static-analyzer 가 부트로더 문자열에서 도출
-- 매니페스트가 없으면 기본 이름을 쓰되 **기본값을 썼다고 결과에 명시**한다
+- 매니페스트가 없으면 기본 레이아웃을 쓰되 **기본값을 썼다고 결과에 명시**한다. 한 벤더의 기본 이름
+  (`keystorage` · `param` · `up_param`)은 `--family exynos` 일 때만 들어가고, 다른 계열(과 eMMC)은 그 이름이
+  없는 중립 레이아웃이다. `--family` 를 생략하면 예전 동작(Exynos 기본값)과 결과의 `warning_family` 다
 
 ### 블록 크기
 
@@ -71,12 +73,32 @@ bash scripts/py.sh build_lu.py <workdir> --out <workdir>/fw/lu0.img
 simg2img system.img system.raw
 ```
 
-### 커맨드라인은 PARAM 파티션에
+### 매체 종류 (eMMC · UFS)와 항목의 출처 종류
+
+- 매체 종류는 `detect_medium.py` 가 판정한다. **부트로더 로그의 초기화 줄**이 1순위이고 DTB 노드가
+  2순위이며, 못 정하면 `unknown` 이다 (DTB 에 UFS 호스트 노드가 있다는 사실만으로는 정하지 않는다).
+  `build_lu.py --medium emmc` 는 512 바이트 블록을 쓴다
+- 매니페스트 항목은 출처 종류 `kind`(`firmware` · `zero` · `synthesized` · `forged` · `modified`)를
+  적을 수 있고, 결과 옆의 `lu_provenance.json` 에 파티션별로 남는다. **우리가 만든 바이트(`synthesized` ·
+  `forged`)는 검증의 참조 집합에서 빠진다.** 우리가 쓴 바이트가 "펌웨어에 있는 문자열"의 근거가 되면
+  출력 출처 게이트가 자기 자신을 확인하게 된다
+- 펌웨어 바이트를 고쳤으면(`modified`) 우회 기록에 이미지 수정(종류 `I`)으로 적는다
+- 벤더 고유 구조(파티션 표, 부트 파라미터, 위조한 체인 파티션)는 `build_lu.py` 가 만들지 않는다.
+  에이전트가 펌웨어별로 도출해 만든 파일을 `synthesized` · `forged` 로 넘긴다
+
+### 커맨드라인은 계획이 이름 붙인 파티션에
 
 - 부트로더가 `console=ram` 을 고르면 커널 로그가 RAM 버퍼로 간다
-- static-analyzer 가 `cmdline_plan.json` 에 도출 → `build_lu.py` 가 PARAM 에 기록
-- **우회가 아니다.** 정상 경로(`setup_param_info` → `sbl_set_bootargs`)를 쓰고,
-  문자열은 이미 펌웨어 안에 있다
+- static-analyzer 가 `cmdline_plan.json` 에 도출 (`partition`: 부트로더가 커맨드라인을 읽는 파티션의
+  이름, 매니페스트와 같은 이름) → `build_lu.py` 가 **그 파티션에** 기록
+- 커맨드라인이 파티션에서 오지 않으면(부트로더에 내장, 부트 이미지 헤더 등) 쓰지 않고
+  `warning_cmdline` 으로 이유를 알린다. 계획이 파티션을 말하지 않고 `param` 이라는 파티션이 있으면
+  거기에 쓰는 폴백은 `--family exynos` 일 때만 있고(파이프라인이 항상 `--family` 를 넘긴다) 그 이름이
+  추측이라 `warning_cmdline_target` 으로 알린다. 다른 계열에는 벤더 기본 이름도 폴백도 없다
+- **우회가 아니다.** 부트로더 자신의 경로를 쓰고, 문자열은 이미 펌웨어 안에 있다. 어느 파티션인지는
+  펌웨어마다 도출한다 (예: Exynos S-Boot 는 PARAM 을 `setup_param_info` → `sbl_set_bootargs` 로
+  읽는다. 한 부트로더의 예이지 규칙이 아니다)
+- 매체 종류(eMMC·UFS)를 정한 근거가 없으면 `warning_medium` 이 알린다 (UFS 기본값은 이전 호환)
 
 ### 총 크기 고정
 
@@ -121,7 +143,8 @@ UFS guid partition table updated. → Make New Param Env File..
 상세는 `knowledge/faults_storage.md`.
 
 **벤더 드라이버가 `.ko` 일 필요는 없다.** 빌트인(`CONFIG_SCSI_UFS_*=y`)이면 `.ko` 는
-설계상 없다. `.ko` 도 없고 커널 이미지에도 없을 때만 `BLOCKED_KO`.
+설계상 없다. `.ko` 도 없고 커널 이미지에도 없을 때만 `BLOCKED_KO` (F2 이상에서 static-analyzer 가
+저장소 드라이버의 형태를 `module` · `builtin` · `absent` 로 보고하고 `absent` 일 때 파이프라인이 세운다).
 
 ---
 

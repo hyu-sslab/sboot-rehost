@@ -3,7 +3,392 @@
 이 플러그인은 `.claude-plugin/plugin.json` 의 `version` 을 올렸을 때만 사용자에게
 업데이트가 전달된다. 각 버전에 무엇이 들어갔는지 여기에 기록한다.
 
-업데이트 방법은 [README 2. 업데이트](README.md#2-업데이트) 참조.
+---
+
+## 0.29.2 — 2026-10-08
+
+**LLM 이 읽는 글(정본 · 스킬 · 파이프라인의 에이전트 지시)을 짧은 영어로 옮겼다.** 같은 내용이 영어로는 토큰이 덜 든다는 판단이다. 사람이 읽는 출력은 그대로 한국어다.
+
+**0.29.0 과 0.29.1 은 배포된 적이 없고** (`origin/main` 은 0.27.0 이었다) **0.29.2 가 이 변경을 처음 내보내는 버전이다.** 버전을 올린 것은 `CLAUDE.md` · `skills/` · `workflows/` 가 릴리스 표면(`scripts/check_release.sh`)이라 문서만 고쳐도 상승이 필요하기 때문이다.
+
+### 무엇이 바뀌었나
+
+- **영어로 옮긴 것**: `CLAUDE.md`, 스킬 `start` · `init` · `export` 의 본문, `workflows/pipeline.js` 안에서 에이전트에게 주는 한국어 지시(`DOC_STYLE`, 지문 줄 끝의 `최초 예외 블록:` 라벨은 `Origin exception block:` 으로, 도출 행의 `[담당 …] 시도:` 라벨은 `[owner …] try:` 로, 그 밖의 문구 몇 곳. 모두 27줄). 직역이 아니라 짧게 다시 썼다. 규칙 · 수치 · 명령 · 표 행 · 정직성 규칙의 이유 한 줄은 줄이지 않았다. 번호와 제목 구조(§ 번호, Step 번호)는 그대로다.
+- **한국어로 둔 것**:
+  - `skills/status/SKILL.md` — 일부러 둔다. 시험이 한글이 비공백 글자의 20% 를 넘는지 본다.
+  - 사용자에게 보이는 모든 출력 — 진행 · 보고 · 질문 · 에이전트가 쓰는 문서 · 보고 서식 · 기록 문구. 옮긴 파일마다 "사용자에게 하는 말과 쓰는 문서는 한국어" 한 문장을 넣었다.
+  - `README.md` · `CHANGELOG.md`.
+  - **계약 문자열** — 스크립트 · verifier · 시험이 바이트 그대로 맞춘다. 장부 필드(`대상` · `이유` · `방법` · `부작용` · `알려진 부작용` · `메타`), 메타 키(`종류` · `표지` · `출처` · `도출` · `근거`), `(기록 없음)`, `## 도출된 정지점` · `시그니처`, `미확정`, `주소 창`, 판정 문구(`VERIFIED (출처 검증 통과)` · `검증 우회 N건` · `verify_ok: reached_bypassed`), 등급 표기 `F2 (verify_ok 우회 N건)`, `배너 미관측`. 목록은 `CLAUDE.md` 맨 앞 "Language" 절의 표가 정본이다.
+- **스크립트는 바꾸지 않았고 `workflows/pipeline.js` 의 코드와 분기도 그대로다.** `agents/` 는 이미 대부분 영어였고, 이번에 옮긴 것은 `agents/fixer-secureboot.md` 의 판정 표(`상황 | 판정`)와 조사 순서의 굵은 머리말뿐이다. 남은 한국어는 계약 문자열 · 출력 예다. 바뀐 것은 에이전트가 읽는 문구(정본 · 스킬 · 프롬프트 · 그 에이전트 파일의 두 곳)뿐이라, 같은 입력에서 에이전트의 선택이 달라질 수 있다. 그 효과는 측정하지 않았다.
+- **문서 정리**: 초기 설계 노트와 설계 초안(`_design/`)을 [설계 근거](docs/design-rationale.md)와 [백로그](docs/backlog.md)로 합치고 원본(`docs/agent-architecture-rationale.md` · `docs/improvement-proposals.md` · `_design/`)은 지웠다 (0.29.1 의 D4 는 이것으로 닫힌다). 설계 근거 3.2 의 흐름은 시퀀스 다이어그램 4장(준비 · 회차 루프 · 정지점 처리 · 검증과 포장)으로 나눴고, README · components · onboarding 의 그림은 Mermaid 로 바꿨다. onboarding 02 의 정지 코드 표와 onboarding README 의 명령 블록은 README 로 연결되는 링크로 바꿨다.
+- `fixers/registry.yaml` 의 주석 두 곳: `fixer-general` 이 마지막 수단으로 있다는 사실과 어긋나던 설명을 고쳤다 (영어 주석이고 코드 동작은 없다).
+
+### 토큰 절감은 추정이다 (측정하지 않았다)
+
+| 파일 | 이전 (바이트) | 이후 (바이트) | 비율 |
+|---|---|---|---|
+| `CLAUDE.md` | 62,413 | 55,204 | 88% |
+| `skills/start/SKILL.md` | 24,728 | 20,888 | 84% |
+| `skills/init/SKILL.md` | 19,859 | 16,404 | 83% |
+| `skills/export/SKILL.md` | 13,499 | 11,824 | 88% |
+| 위 네 파일 합계 | 120,499 | 104,320 | 87% |
+| `workflows/pipeline.js` | 272,261 | 271,852 | 99.8% (프롬프트는 대부분 이미 영어였다) |
+
+- 한국어는 글자당 3바이트이고 영어는 1바이트 안팎이라 **바이트 비율은 토큰 비율이 아니다.** 토큰 수는 재지 않았다. 절감 폭은 추정이다.
+- 산문을 한국어의 60% 쯤으로 줄이는 것이 목표였으나 도달하지 못했다. 규칙 · 수치 · 명령 · 표를 줄이지 않았기 때문이다.
+
+### 시험
+
+- `canon` 에 "한국어 계약 문자열" 묶음(canon 9)을 더했다. 위 계약 문자열마다 정본 표 · 파서 · (장부 필드 · 메타 줄 · 빈 기록 표지는) 에이전트 지시에 그대로 남았는지 보고, 파서의 `부작용` · `pipeline.js` 의 `배너 미관측` · 정본 표의 `주소 창` 을 영어로 바꾼 사본을 그 검사가 정확히 그 셋으로 잡는지 본다. 에이전트 지시 층은 `대상` · `메타` 같은 흔한 낱말 하나가 아니라 `FIXER_RULES` 4 항과 `agents/fixer-secureboot.md` 의 문장 조각(`` `대상 / 이유 / 방법 / 부작용` `` · `` `- 메타: 종류=…; 표지=…; 출처=…; 도출=…` `` · `` never `(기록 없음)` `` 등)에 고정했고, 그 조각을 영어로 바꾼 사본을 장부 필드 · 메타 키 · `(기록 없음)` 전부 잡는지도 본다. 그 밖에 status 스킬이 한국어로 남았는지, 한국어 출력 문장이 정본 · 스킬 셋 · `pipeline.js` 에 모두 있는지를 본다.
+- 영어로 바뀐 문장을 고정하던 시험(`canon` · `init_clean` · `smoke` · `pipeline_sim/scenarios_neutral.js`)의 조각은 같은 규칙을 말하는 영어 조각으로 옮겼다. 규칙이 번역에서 빠진 곳은 시험을 고치지 않고 번역의 결함으로 올린다는 방침이었고, 이 항목을 쓸 때 그런 곳은 없었다.
+
+### 커버리지
+
+영역별 시험 `tests/parts/*.sh` 를 파일별로 단독 실행한 값 (2026-10-07, 번역 직후):
+`family_kit` 162 · `init_clean` 184 · `integration` 115 · `machine_tmpl` 152 · `medium` 167 ·
+`observe` 205 · `pipeline_family` 696 · `stage_map_arm32` 250 · `verify_gates` 269 · `canon` 473
+(합계 2,673, 실패 0). 이 항목에서 개수가 늘어난 것은 `canon` 뿐이다 (번역 직후 412 → 473: 계약 문자열 묶음 · 에이전트 층 시험 · 0.29.2 항목 시험을 더했다). 전부 가짜 QEMU 와 합성 입력으로 돈 것이다.
+
+### 확인하지 못한 것
+
+- **의미 보존**: 번역한 담당의 자기 점검과 시험이 고정한 문장이 근거다. 원문과 줄 단위로 독립 대조하지는 않았다.
+- 전체 `tests/smoke.sh` 는 영어 번역 직후에는 돌리지 않았고(영역별 시험만 단독으로 돌렸다), 문서 정리와 문구 보정까지 끝낸 뒤 한 번 돌려 2,885 통과 / 0 실패였다. 가짜 QEMU 와 합성 입력으로 돈 것이다.
+- **열린 결정 (코드와 문서가 어긋남)**: `CLAUDE.md` §4 · `agents/fixer-general.md` · `fixers/registry.yaml`(`reached_by: decline_only`)은 `fixer-general` 이 전문가가 전부 반려한 뒤에만 도달한다고 적는데, `workflows/pipeline.js` 는 그 밖에 두 길을 더 연다. supervisor 가 담당 fixer 가 없다고 판단하면 분류를 건너뛰고 바로 보내고(`route === GENERAL_FIXER`), QEMU 가 콘솔 출력 뒤에 비정상 종료하면(`qemu_abort`) 곧장 보낸다. 문서를 코드에 맞출지 코드를 문서에 맞출지 정하지 않았다.
+- 영어 지시로 실제 LLM · QEMU · 워크플로 런타임을 돌린 적이 없다 (0.29.1 의 알려진 한계와 같다).
+- 검증자 프롬프트에 들어가는 `hash_engine` 행 서술 한 줄은 `[검증]` 로그 줄과 같은 문자열이라 시험이 한국어로 고정하고 있어 옮기지 않았다 (`hashEngineText`). 그 줄은 한국어로 남은 에이전트 입력이다.
+
+---
+
+## 0.29.1 — 2026-10-06
+
+**0.29.0 이전에 쓴 MediaTek 설계 문서 12개를 지운다.** 구현이 끝난 지금 설계 문서는 더
+필요 없고, 내용은 git 이력(1d47260 이후)에 남는다.
+
+### 무엇이 바뀌었나
+
+- `docs/mediatek/` 의 설계 문서 12개(README · boot-medium · bypass-policy · family ·
+  goals-observation · init-clean · machine · roadmap · runbook · stage-map · status ·
+  verification)를 지웠다.
+- `README.md` 의 "현재 상태" 를 줄였다: 쉽게 낡는 영역별 시험 수와 합계를 뺐고(측정한 개수는
+  이 변경 이력이 정본이다), 정직한 한계(실제 QEMU · LLM · 워크플로 런타임 미실행, 템플릿은
+  컴파일만, MediaTek 근거는 한 기기 수작업 키트뿐, 하드웨어 해시 예외는 잠정)는 그대로 둔다.
+  문서 표의 설계 문서 링크도 뺐다.
+- `CLAUDE.md` 와 `knowledge/runbook_mediatek.md` 가 삭제한 문서를 가리키던 포인터를 자립형으로
+  바꿨다. `examples/a136u-mt6833/` 의 머리말 포인터도 같다.
+- **어느 스크립트나 에이전트 프롬프트의 동작도 바뀌지 않았다.** 지운 것은 설계 문서와 그 문서를
+  가리키던 포인터, 그리고 그 문서를 고정하던 `canon` · `family_kit` · `machine_tmpl` 시험뿐이다.
+
+**0.29.0 은 배포되지 않았고**(`origin/main` 은 0.27.0 이다) **0.29.1 도 배포 전이다.** 버전을
+올린 것은 `CLAUDE.md` 와 `knowledge/` 가 릴리스 표면(`scripts/check_release.sh`)이라 문서만
+고쳐도 상승이 필요하기 때문이고, 동작이 바뀌어서가 아니다.
+
+### 열려 있는 항목 · 열린 결정
+
+삭제한 설계 문서의 `status.md` §10-3 · §11 과 `roadmap.md` §4 에 있던 것 중 아직 열려 있는
+것이다. 0.29.0 항목의 "열어 둔 것" 에 더해:
+
+- **Q3 (사용자 미답)**: 하드웨어 해시 엔진 펌웨어의 검증 우회 예외는 정본 §11 에 **잠정**으로
+  들어갔다. 사용자가 답해야 확정되거나 지워진다. (c) 엄격 모드는 미구현(D3).
+- **Q12 (사용자 미답)**: `init` 의 "시작 폴더" 를 세션을 연 폴더(`<cwd>/rehost_workspaces`)로
+  이해한 것이 맞는지.
+- **Q13 (사용자 미답)**: 수작업 키트의 머신 소스를 `examples/a136u-mt6833/` 참조 예제로 넣은
+  것 (소스와 우회 장부만 있고 펌웨어는 없다. `.gitignore` 예외와 함께 커밋했다).
+- 그 밖의 열린 결정: Q4(게이트 2 미발견 형태별 상한 — 지금은 보고만), Q8(키트 `08_docs` 자료
+  입수), Q9(PR #3 작성자 피드백 — 남기지 않았다), D4(`docs/agent-architecture-rationale.md` ·
+  `docs/improvement-proposals.md` 추적 여부).
+- **D7**: 링 용량(`console_size`)이 없는 메모리 덤프 영역의 두 경로가 어긋난다. 실제 기기에서 정한다.
+- **C16 ②**: 에스컬레이션 프롬프트와 `agents/static-analyzer.md` 14d 가 `hash_engine` 행을
+  `## 도출된 정지점` 절 위의 자기 절에 쓰라고 지정하지 않는다 (①·③ 은 닫힘).
+- 일부러 둔 리뷰 지적: eMMC 컨트롤러 골격 없음(C9), 게이트 2 를 전체 참조 집합에 돌려 시간
+  예산 안에 끝나는지 미측정(C10), `derived_facts.py` 가 `hash_engine` 행을 새 사실로 세지
+  않음(C12), 파이프라인이 분석가의 `has_super` 를 되읽지 않음(A20), `generic.yaml` 의 남은
+  Exynos 힌트와 지식표의 한 기기 문자열(L6 · L7), `surface_not_credited` 를 `observation.json`
+  으로 옮기지 않음(L12).
+- **알려진 한계**: 실제 QEMU · 실제 LLM · 실제 워크플로 런타임으로 돌린 적이 없다. 머신 템플릿은
+  QEMU 헤더에 대해 컴파일만 했다. MediaTek 진행 가이드(`knowledge/runbook_mediatek.md`)를
+  에이전트 루프가 실제 펌웨어에서 끝까지 따라 돈 적이 없다. 근거는 SM-A136U 한 대의 수작업 키트뿐이다.
+
+---
+
+## 0.29.0 — 2026-10-06
+
+**0.28.0 에 담긴 MediaTek 계열 작업을 처음 배포하고, 그 위에서 한 기기의 값이 계열 중립 경로에 기본값으로 박힌 곳을 걷어 낸다.**
+
+**0.28.0 은 배포되지 않았다** (`origin/main` 은 0.27.0 이다). 사용자의 결정으로 버전을 0.29.0 으로 올렸다. 아래 0.28.0 항목은 그 개정이 담은 내용의 이력으로 그대로 두고, 0.29.0 은 그 항목의 모든 변경과 이 항목의 변경을 함께 담는다. 그래서 MediaTek 계열 작업을 처음 받는 버전이 0.29.0 이다.
+
+### 무슨 일이 있었나
+
+0.28.0 의 2차 작업 뒤 감사가 두 가지를 짚었다. 한 기기의 값(파티션 이름, 부트로더 배너, 기본 입력 패턴, 한 벤더의 성분 이름)이 계열 중립 경로에 기본값이나 판정 입력으로 남아 있었다는 것, 그리고 폐기된 `--track` 흐름의 코드와 문서가 남아 있었다는 것이다. 플러그인은 순서 · 근거 · 측정을 주는 가이드이고 값은 대상 펌웨어에서 도출한다 (정본 §7 규칙 3 · 4). 이 개정은 그 원칙에서 벗어난 곳을 걷어 낸다. **계열이 주어졌을 때 Exynos 와 MediaTek 실행이 하는 일을 바꾸지 않는 것이 목표였고**, 알고 있는 예외를 아래 "동작이 달라지는 곳"에 적었다. **그 표는 알고 있는 예외의 목록이지 완전하다는 보증이 아니다:** `workflows/pipeline.js` 의 프롬프트와 분기를 이전 판과 줄 단위로 전수 대조하지는 않았다 ("확인하지 못한 것" 참조).
+
+### 동작이 달라지는 곳
+
+| 곳 | 이전 | 지금 |
+|---|---|---|
+| `build_lu.py` | 계열을 몰랐다. 기본 레이아웃에 Exynos 이름(`keystorage` · `param` · `up_param`)과 "`param` 파티션에 쓴다" 폴백이 있었다 | `--family` 를 받는다. `exynos` 일 때만 그 이름과 폴백이 있다. 다른 계열은 이름 없는 중립 레이아웃이고, 계획 · 매니페스트가 이름 붙인 파티션에만 쓰며 아니면 `warning_cmdline`. 생략하면 예전 동작과 `warning_family`. 파이프라인은 항상 넘긴다 |
+| `carve_disasm.py` | 아키텍처가 문자열 · 크기 기준을 골랐다 (arm64 면 S-Boot 식 묶음) | `--family` 가 고른다. 기준이 없는 계열이고 컨테이너 헤더 근거도 없으면 `is_full: null` (판정 불가, 거짓이 아니다). 파이프라인은 `false` 일 때만 `BLOCKED_CARVE`, `null` 은 "carve undetermined" 로 기록하고 계속한다. 생략하면 예전 동작 |
+| `run_full.sh` 표면 칸 | `milestone_tokens.txt` 가 없으면 한 부트로더의 배너로 shell 표면을 도달로 셌다 | 내장 배너가 없다. 도달로 세지 않고 `fingerprint.json` 에 `surface_not_credited: "no derived token file"` 을 남긴다. **계열과 무관하게 달라진다** |
+| `uart_harness.py` | `input_plan.json` 이 없으면 CR 세 번이 기본 패턴이었다 | 인터럽트 패턴을 보내지 않고 `source: "absent"`. `bytes` 와 `count` 가 둘 다 있어야 쓸 수 있는 계획이다. **계열과 무관하게 달라진다** |
+| 스토리지 골격 | 매체 종류와 상관없이 에이전트에 제시했다 | UFS 이거나, 미정이면서 계열이 exynos 일 때만 제시한다. 템플릿은 Exynos UFS 골격이라고 밝히고 값은 자리표시자다 |
+| `fixer-general` 의 변경 | `check_change.sh` 를 거치지 않고 셌다 | 전문가와 같은 적용 단계(검문, 위반이면 복원, 동기화, 빌드, 기록)를 거친다. `qemu_abort` 경로의 일반 fixer 도 같다. **범위는 전문가와 다르다 (사용자의 결정, 2026-10-06):** 파이프라인이 `fixer-general` 에게만 `CHANGE_SCOPE=general` 을 주고, 그 범위에서 `check_change.sh` 는 **소스 파일 하나 검사와 `MAX_HUNKS` 검사만 건너뛴다.** 변경 없음 · 우회 기록 4항목 · 쓸 수 있는 기록 · 패치 표 행 대응 · `hash_engine` 행은 전문가와 똑같이 묶는다. 하나의 일관된 메커니즘이 여러 곳 · 여러 파일에 걸치는 것을 한 회차의 변경 1건으로 센다 (모든 정지점에 담당 fixer 가 있지 않아서 쓰는 마지막 수단이다) |
+| fixer 의 답 | `escalate` · `suspect_prior_bypass` · `bypass_doc` · `category` 필드가 있었다 (파이프라인이 읽지 않았다) | 필드가 없다. 열린 질문은 `no_new_change=true` 와 `rationale` 로 답하고, 반려한 fixer 의 `rationale` 이 다음 에스컬레이션의 초점이 된다 |
+| 일반 fixer 의 빌드 실패 판정 | 일반 fixer 가 자기 답에 `build_ok=false` 를 쓰면 그것만으로 `BLOCKED_BUILD` 로 정지했다. 파이프라인이 잰 빌드 결과는 이 경로에 없었고, `qemu_abort` 경로의 일반 fixer 는 빌드 실패를 아예 보지 않았다 | 적용 단계가 `ninja` 를 재서 `build_ok` 를 낸다. **측정이 권위다:** 측정이 `false` 이면 정지하고, 측정이 `true` 이면 fixer 가 자기 빌드를 실패라고 보고해도 정지하지 않는다. 측정이 없거나 `null` 일 때만 fixer 의 `false` 가 선다 (`applyChange`). **계열과 무관하게 달라진다** (일반 fixer 에 닿는 모든 실행). 전문가 경로는 이전처럼 측정값만 본다 |
+| fixer 프롬프트의 구성 | 전문가 프롬프트에는 `Originating exception block` 줄이 있었고 `Console` · `Summary` · `Full trace` 줄은 일반 fixer 만 받았다. 일반 fixer 는 supervisor 의 `suspect_prior_bypass`(정체 때 앞선 우회의 부작용부터 의심하라는 줄)를 받지 않았다. 규칙은 각 프롬프트의 꼬리 문구와 에이전트 파일에 따로 있었다 | 둘이 한 함수(`fixerContext`)로 같은 맥락을 받는다. 전문가 프롬프트에 `Console` · `Summary` · `Full trace` 줄이 **더해지고** `Originating exception block` 줄은 **빠진다** (같은 블록은 `Fingerprint` 줄 끝의 `최초 예외 블록:` 으로 여전히 간다). 일반 fixer 도 `suspect_prior_bypass` 줄을 받는다. 규칙 본문은 `FIXER_RULES` 로 옮겼다. **계열과 무관하게 달라진다.** fixer 가 읽는 입력이 바뀌므로 fixer 의 선택이 달라질 수 있고, 그 효과는 측정하지 않았다 |
+| `verify.py` | 옛 `--track` · `--bl3` 흐름과 `verify_byte_match.py` | 없다. 두 옵션은 인자 오류(종료코드 2)다. 판정 로직과 JSON 키는 그대로다 |
+
+### 지운 것과 줄인 것
+
+- `scripts/verify.py` 의 옛 흐름(`verify_track1` · `verify_track2` · 옛 판정 문구, 931 → 688 줄), `scripts/verify_byte_match.py`(80 줄. 문서가 말하던 "`verify.py` 와 같은 판정"은 거짓이었다), `derived_facts.py` · `static_rotate.py` · `analyze_run.py` 의 숨은 `--track`, `make_export.sh` 의 `kboot_*` 글롭, `docs/bootchain-feasibility.md`(폐기된 트랙 1 · 2 구분 위의 v0.18.0 기록)
+- 한 벤더의 이름: `verify_gates.py` 의 성분 이름과 게이트 2 실패 문구, `profiles/generic.yaml` 의 힌트(`epbl` · `teegris` · 셸 프롬프트 · `keystorage`는 `exynos.yaml` 로), `storage_hci.c.tmpl` 의 항상 준비 · 전부 1 반환 값
+- 검증자(verifier) 프롬프트가 더는 명시적 `--pc` 를 권하지 않는다 (`verify.py` 는 그 옵션을 받고 무시한다. 항목은 "열어 둔 것")
+- fixer 공통 규칙은 `workflows/pipeline.js` 의 `FIXER_RULES` 하나가 되어 전문가 여섯과 `fixer-general` 에 붙는다. `agents/fixer-*.md` 일곱 파일은 889 → 712 줄이 되었고 그 fixer 만의 것과 포인터 한 단락이 남았다. 일반 fixer 호출 세 곳이 `settleGeneral` 하나로, 적용 단계가 `applyChange` 하나로 모였다. 그래도 **`pipeline.js` 는 4,184 → 4,315 줄로 늘었다.** 새 적용 단계 · 질문 이월 · carve 기록이 지운 중복보다 컸다
+- 텍스트 중립: 여섯 fixer · supervisor · static-analyzer · 분류기의 JSON 예에 "모양만" 표시와 자리표시자, 마일스톤 열은 줄 모양으로, static-analyzer 저장소 절은 매체 종류를 먼저 정한다. `examples/s921n-exynos2400` 에 "값을 차용하지 않는다" 표지, `.gitignore` 의 문서 이름은 `/NAME` 으로 고정
+
+### 정본과 문서가 바뀐 곳
+
+- `CLAUDE.md` §3: `kernel_entry` 는 한 부트로더의 문자열이 아니라 "부트로더가 자기 커널 점프 줄(도출값)을 낸 것". 커맨드라인의 `param` 폴백은 `--family exynos` 일 때만. 표면 칸의 내장 배너가 없다는 것과 입력 계획이 없으면 패턴도 없다는 것. §4: `FIXER_RULES`, 일반 fixer 의 검문과 그 범위(`CHANGE_SCOPE=general` 은 파일 · hunk 검사만 건너뜀), 스크립트 표(`carve_disasm.py` 행 신설, `check_change.sh` 행에 범위). §9 · §16: 회차 1건 = 변경 1건에서 일반 fixer 는 한 메커니즘이 여러 곳에 걸쳐도 1건이고 파일 · hunk 수는 전문가의 한계다. §10: `BLOCKED_CARVE` 는 `false` 일 때만. §11: 항목 2 의 대조 대상에서 한 벤더의 성분 이름을 뺌
+- `README.md` 의 "지키는 것", `docs/components.md`, `docs/onboarding/04`, 그리고 설계 문서 runbook · bypass-policy(0.29.1 에서 삭제)의 회차당 변경 1건 서술에 같은 범위를 적었다. 설계 문서 status §10-3(삭제됨)에 이 정리와 **의도적으로 열어 둔 것**을 적고(구현 현황의 단일 출처), roadmap(삭제됨)은 정리가 새 단계가 아님을 적었다. 세 설계 문서가 입력 위치로 적던 `analyze/<기기>.zip` 은 "수작업 키트(저장소에 포함되지 않는다)"로 바꿨다. verification(삭제됨)의 낡은 서술(옛 `verify_track1` 이 `--surface` 를 읽는다는 것)을 바로잡았다
+- `agents/static-analyzer.md` 를 코드와 맞췄다. carve 절은 기준을 `--family` 로 고른다고 쓰고(`exynos` · `mediatek` 은 그 계열의 기준, `generic` 이나 기준이 없는 계열은 기준 없음. `--family` 를 생략하면 예전 아키텍처별 동작이고 `family:` 줄이 없다), `is_full` 의 `True` · `False` · `null` 과 `carve_note` 를 설명한다. 입력 계획 절(12a)은 쓸 수 있는 계획이 없으면 인터럽트 패턴을 보내지 않고 `source: "absent"` 라고 쓴다 (옛 "기본값 CR 세 번" 서술을 지웠다). 명령줄 절(14a)은 `param` 폴백이 `--family exynos` 일 때만이라고 쓴다. 이 서술은 `tests/parts/family_kit.sh` 가 코드(`carve_disasm.py` 의 기준표, `uart_harness.py` 의 입력 계획, `build_lu.py` 의 폴백)와 대조한다. 설계 문서 status(삭제됨)의 L13 은 그래서 지웠고, 이미 고쳐져 있던 C13 · C14 (계획 예의 `partition` · `offset`, 태스크 정규식의 검색 서술)는 닫힘으로 바꿨다
+
+### 열어 둔 것
+
+감사가 지적했으나 일부러 고치지 않은 것이다. 이유와 전체 목록(13건)은 삭제된 설계 문서 status §10-3 에 있었다 (git 이력 1d47260 이후). 아직 열려 있는 것은 0.29.1 항목이 옮겼다.
+
+- 매체 종류를 정하지 못했을 때의 UFS 기본값 (`warning_medium` 으로 알린다. 호환 시험이 고정한다)
+- `patch_qemu_core.py` 의 세트 이름 `exynos` (이름이 계열이 아니라 SMC 훅이라는 동작이다)
+- 정지와 회차 한계의 인계 블록 중복 (문구와 반환 필드가 다르고 시험이 각각을 고정한다)
+- 서로 닮은 분석가 프롬프트 (시험이 각 문구를 고정한다)
+- `run_full.sh` 의 fastboot 표면 폴백, `verify.py` 의 `--pc` 수용(무시) 등
+- 일반 fixer 의 변경이 정말 한 메커니즘인지는 기계가 세지 않는다. 파일 · hunk 수를 일반 fixer 에게 세지 않기로 한 결정의 결과이고 (위 "동작이 달라지는 곳"), 그 판단은 `agents/fixer-general.md` 규칙 1 의 한 문장 설명 요구(프롬프트)와 "지문을 움직이지 못한 변경은 시도로 세지 않는다"가 맡는다
+
+### 커버리지
+
+영역별 시험 `tests/parts/*.sh` 를 파일별로 단독 실행한 값 (2026-10-06):
+`family_kit` 163 · `init_clean` 184 · `integration` 115 · `machine_tmpl` 153 · `medium` 167 ·
+`observe` 205 · `pipeline_family` 696 · `stage_map_arm32` 250 · `verify_gates` 269 · `canon` 471
+(합계 2,673). 직전 점검(0.28.0 2차 작업 뒤)의 값은 `family_kit` 133 · `init_clean` 184 · `integration` 104 · `machine_tmpl` 143 ·
+`medium` 141 · `observe` 187 · `pipeline_family` 556 · `stage_map_arm32` 228 · `verify_gates` 261 · `canon` 413 이었다.
+`tests/uart_harness_test.py` 는 `smoke.sh` 가 부르지 않아 따로 돌렸고 통과했다. 전부 가짜 QEMU 와 합성 입력으로 돈 것이다.
+**전체 `tests/smoke.sh` 는 이 항목을 쓸 때 돌리지 않았다** (마지막 전체 실행은 이 정리 전의 2,557 통과 / 0 실패다).
+새 동작마다 되돌린 사본에서 시험이 실패하는 것을 담당자가 확인했다고 보고했고, 이 항목의 정본 · 문서 시험(`canon` 8c)은
+문서나 코드 표식을 되돌린 사본에서 실패하는 것을 확인했다.
+
+### 확인하지 못한 것
+
+- **QEMU 에서 실행한 것이 없다.** 이번 변경 어느 곳도 실제 QEMU 로 돌려 보지 않았다.
+- **계열이 주어졌을 때 Exynos 와 MediaTek 실행이 하는 일이 같다는 것**(위 "동작이 달라지는 곳" 의 예외를 뺀 것)은 코드를 읽고 합성 입력 시험으로 확인한 것이다. 실제 펌웨어로 이전 버전과 같은 결과가 나오는지는 돌려 보지 못했다.
+- **"동작이 달라지는 곳" 은 알고 있는 차이의 목록이다.** `workflows/pipeline.js` 의 프롬프트 문구와 분기를 이전 판과 줄 단위로 전수 대조하지 않았다. 표에 뒤늦게 더한 둘(일반 fixer 의 빌드 실패 판정, fixer 프롬프트의 구성)은 검토에서 표 밖의 차이로 발견된 것이다. 같은 종류의 차이가 더 남아 있을 수 있다.
+- 표면 칸의 내장 배너와 기본 CR 패턴 폐기는 계열과 무관하게 동작이 바뀐다. `milestone_tokens.txt` 나 `input_plan.json` 없이 표면에 닿던 실행이 실제로 있었는지 확인하지 못했다. 있었다면 이제 static-analyzer 가 그 파일을 써야 닿는다.
+- `workflows/pipeline.js` 는 합성 에이전트로만 돌려 봤다. 실제 워크플로 런타임 · 실제 LLM 으로는 돌리지 않았다.
+- `storage_hci.c.tmpl` 은 자리표시자로 바뀌었고 스텁 헤더로 구문만 검사했다. QEMU 10.2.2 헤더에 대한 컴파일은 하지 못했다.
+- 0.28.0 항목의 "확인하지 못한 것"은 그대로 유효하다 (아래).
+
+---
+
+## 0.28.0 — 2026-10-05 (배포되지 않음, 0.29.0 에 포함)
+
+**MediaTek 계열을 가이드 수준으로 지원하고, 그 설계 과정에서 드러난 공통 결함을 함께 고친다.**
+
+### 무슨 일이 있었나
+
+SM-A136U(MT6833) 한 대를 수작업으로 끝까지 진행한 키트가 있었다. 그 키트가 MT 지원을
+위해 고쳤다고 적은 항목은 **저장소에 하나도 반영되어 있지 않았다.** 설계 12개 문서
+(0.29.1 에서 삭제)를 쓰고 그 구현을 이번 버전에 넣었다.
+
+설계 과정에서 MT 와 무관한 결함이 같이 나왔다. 이쪽이 Exynos 에도 해당한다.
+
+| 결함 | 영향 |
+|---|---|
+| `run_full.sh` 의 감시 PC 목록이 항상 비어 있음 (`base` 가 딕셔너리인데 정수로 걸렀다) | 참고 항목 4 가 모든 SoC 에서 통과 불가 |
+| 게이트 1 이 문자 배열 · 바이트 배열 · `printf` 를 놓치고, 호스트 줄이 섞이면 65건을 거짓 적발 | 위조 콘솔이 통과하거나 진짜 콘솔이 실패 |
+| `verify.py` 가 `~/rehost/_traces` 의 다른 실행 트레이스를 집을 수 있음 | 항목 4 가 남의 트레이스를 판정 |
+| `init` 의 정리가 플러그인 캐시에 한정되어 옛 QEMU 가 계속 재사용됨 | 최신 플러그인이라 믿고 옛 환경으로 진행 |
+| `avb_negative.txt` 를 만드는 코드가 없음 | 참고 항목 5 가 모든 SoC 에서 통과 불가 |
+| `ufs_controller` 라벨이 eMMC 기기에 찍힘, 템플릿에 `.interfaces` 가 없음, 부트 이미지 폴백의 page size 오프셋 오류, `registry.yaml` 이 엄격한 YAML 이 아님 | 판정 문구 오류, `-M help` 가 머신을 못 찾을 수 있음 |
+| `export` 가 폐기된 "6/6 REAL" 을 요구하고 `plugin.json` 설명도 "6/6" | export 가 막히고 마켓 문구가 과장 |
+
+### 무엇이 바뀌었나
+
+| 영역 | 변경 | 주요 파일 |
+|---|---|---|
+| `init` 정리 | 정리를 캐시에서 도구 체인(QEMU 트리, pip), 임시 파일, 워크스페이스 보고까지 넓힘. 옛 것인지는 플러그인 버전이 아니라 **환경 개정 번호**로 판정. 표지가 있는 것만 지우고 표지 없는 것은 어떤 옵션으로도 지우지 않음. `--clean`, `--wipe-workspaces`(삭제가 아니라 이동), `--replace-unmarked` | `env_manifest.json`, `scripts/clean_env.sh`, `scripts/qemu_tree.sh`, `scripts/setup_env.sh`, `scripts/check_env.sh`, `scripts/purge_cache.sh`, `skills/init/SKILL.md` |
+| 계열 자료 | 프로필의 `knowledge:` · `runbook:` 로 계열 지식표와 진행 가이드를 연결. `start` 가 판별 근거를 기록. 워크스페이스에 `.sboot_version` 표지 | `scripts/family_kit.py`, `profiles/*.yaml`, `skills/start/SKILL.md` |
+| 진행 가이드와 지식표 | MediaTek 진행 가이드(S0~S9), 정지점 표 7행, eMMC(MSDC) 절. 담당 등록 확장과 `registry.yaml` 의 엄격 YAML 정정 | `knowledge/runbook_mediatek.md`, `knowledge/faults_mediatek.md`, `knowledge/faults_storage.md`, `fixers/registry.yaml`, `agents/*.md` |
+| 스테이지 지도 | 스키마 v2(스테이지별 `arch` · `origin` · `entry_pc` · `confidence`), arm32 도출(컨테이너 헤더, GFH, **독립된 두 앵커**), 수렴하지 않으면 `unconfirmed` | `scripts/stage_map.py`, `scripts/carve_disasm.py`, `scripts/extract_boot_assets.sh` |
+| 부팅 매체 | 항목별 `kind` · `lba` · `vendor`, `--medium emmc`, 출처 기록 `lu_provenance.json`, eMMC·UFS 판정(`unknown` 이면 고르지 않음) | `scripts/build_lu.py`, `scripts/detect_medium.py` |
+| 관측 | 게스트 RAM 의 커널 로그를 호스트가 읽는 **메모리 덤프 채널**, 토큰 파일의 채널 열, 커널 채널 지문과 채널별 정체 판정, 게스트 리셋 신호, 예외 수 조기 종료(기본 꺼짐), 호스트 줄 분리 | `scripts/memdump_observe.py`, `scripts/run_full.sh`, `scripts/run_round.sh`, `scripts/stop_conditions.py`, `scripts/trace_filter.py`, `scripts/uart_harness.py`, `scripts/fingerprint_lib.sh` |
+| 검증 | 게이트 1 을 C 렉서로 교체, 입력을 워크스페이스·회차에 묶음, 게이트 3 확장(타이머 콜백, 모니터 명령), 증거 준비 단계, 음성 시험용 매체, **검증 우회 보고**와 판정 문구, 우회 기록 검사(부작용 비움 금지, 패치 표 행 대응) | `scripts/verify_gates.py`, `scripts/verify.py`, `scripts/verify_prep.py`, `scripts/make_negative_image.py`, `scripts/check_change.sh`, `agents/verifier.md` |
+| 머신 | 혼합 아키텍처 골격(구조만, 칩 상수 없음), `.interfaces`, 계열별 QEMU 코어 패치 세트(`--family`) | `templates/machine_mixed_arch.c.tmpl`, `templates/machine_full.c.tmpl`, `scripts/patch_qemu_core.py`, `examples/a136u-mt6833/` |
+| 정본과 문서 | 아래 | `CLAUDE.md`, `skills/*`, `agents/fixer-secureboot.md`, `knowledge/faults_unified.md`, `scripts/make_export.sh`, `README.md`, `docs/*` |
+
+### 정본이 바뀐 곳 (`CLAUDE.md`)
+
+- **§3**: 표면 칸은 선택이다. `kernel_alive` 는 "커널만 낼 수 있는 줄이 어느 채널에서든 확인됨"으로
+  일반화한다. 칸 상태는 `reached` · `reached_bypassed` · `not_reached` 이고 검증 우회가 있으면
+  "F2 (verify_ok 우회 N건)" 으로 쓴다. 관측 채널과 계열 자료 묶음을 적었다.
+- **§4**: "새 fixer 는 파일 하나와 등록 몇 줄"이라는 서술이 **틀렸다.** `KNOWN_FIXERS` 가
+  `pipeline.js` 에 하드코딩되어 있고 `smoke.sh` 가 고정한다. 바로잡았다.
+- **§7**: 우회 기록의 선택 항목 `메타` 한 줄, 부작용 비움 금지, 패치 표 행 태그 `/* bypass:<id> */`.
+- **§10**: `BLOCKED_ARCH` 는 아키텍처가 아니라 **도출기가 진입 시그니처를 못 찾았을 때만** 선다.
+  `BLOCKED_NO_INPUT_PATH` 는 입력 대기가 관측됐을 때만 선다.
+- **§11**: 게스트 콘솔 정의, 게이트 1~3 의 새 내용, 검증 우회 보고, 판정 문구
+  `VERIFIED (출처 검증 통과) · 검증 우회 N건 · verify_ok: reached_bypassed`.
+- **§11 유일한 예외 (잠정)**: "검증 결과는 위조하지 않는다"에 **해시를 하드웨어 엔진이 계산하는
+  펌웨어 하나**에 한해 예외를 넣었다. 순서는 엔진 모델링 → 라벨 달린 우회 → 정지이고, 소프트웨어 해시
+  펌웨어에는 적용하지 않는다. **이것은 규칙의 완화다.** 예외가 없던 규칙에 한 경우의 예외를 넣었고,
+  사용자의 결정(설계 문서 roadmap Q3, 0.29.1 에서 삭제)은 받지 않았다 (설계 권고를 적용했다. status D2).
+  그래서 정본에 **잠정**으로 적고 사용자가 반대하면 지운다. 문을 여는 선행 조건을 붙였다: 해시가
+  하드웨어 엔진이라는 사실을 static-analyzer 가 `STATIC.md` 에 `hash_engine` 으로 도출해야 하고,
+  fixer 는 그 행을 쓰지 못한다. **그 조건의 기계 검사는 처음에는 없었고, 2차 작업(아래)에서 행의 유무와 모양만
+  구현됐다** (`check_change.sh`, `status.md` D6). 행을 누가 썼는지와 (a) 의 실현 불가 판정은 기계가 하지 못해
+  프롬프트와 verifier 가 집행한다.
+  `agents/fixer-secureboot.md` 가 같은 분기와 조건을 따른다.
+- **§14 · §15**: `init` 의 정리 범위와 인자, 환경 매니페스트, 디렉터리 도해의 `.sboot_version` ·
+  `memdump_plan.json` · `lu_provenance.json`. 도해의 "6항목 측정" 오기를 고쳤다.
+- **2차 작업에서 더한 것 (같은 0.28.0 안):** §3 관측 채널(`REHOST_MEMDUMP_REGION` 내보내기, `kernel_task_regex.txt`,
+  호스트 줄을 계획과 무관하게 `host_N.txt` 로, `observation.json` 의 `kernel_log` · `host_log`), §3 커맨드라인은
+  "PARAM 파티션"이 아니라 계획이 이름 붙인 파티션, §4 스크립트 표(`--detect-arch`, `extract_boot_assets.sh`, 새 키),
+  §5 흐름(아키텍처 확정 · 커널 자산 적재가 Analyze 에), §10 정지 코드(`BLOCKED_ARCH` 의 `unknown` 처리, `BLOCKED_ASSET` 은
+  적재한 뒤에도 없을 때만, `BLOCKED_KO` 의 방출기, `init` 의 종료코드 7, 재개 때의 회차 번호), §11(`hash_engine` 행의
+  기계 검사 범위, 주소 창 표 참고 지표), §14(sudo 사전 점검, `start` 의 슬롯표), §15(`INPUT.md` 슬롯, `kernel_task_regex.txt`).
+
+### 동작이 달라지는 곳
+
+| 곳 | 이전 | 지금 |
+|---|---|---|
+| `check_change.sh` | 기록이 한 건도 없는 장부가 통과 (`count_field` 버그) | 반려. 부작용 비움 · `(기록 없음)` · 표 행 대응도 반려 (이번 회차에 새로 쓰거나 고친 기록만) |
+| 게이트 1 | `error_setg` · `assert` 와 `printf` 가 면제 | 면제는 `error_report` 류와 `fprintf(stderr, …)` 뿐. UART 송신 호출 지점이 둘 이상이면 실패 |
+| `verify.py` | 홈 폴더의 최신 트레이스를 폴백으로 읽음 | 읽지 않는다. **항목 4 를 계산하려면 `--trace` 를 넘겨야 한다** |
+| `init` 기본 | 캐시만 정리 | 매니페스트와 어긋난 도구 체인을 지우고 재구축(시작 전에 알림), 1시간 이상 지난 임시 파일·트레이스를 지움 |
+| 표지 없는 `~/qemu-build/qemu-10.2.2` | 그대로 재사용 | **지우지 않고 멈춘다.** `init --replace-unmarked` 로 옆으로 옮긴 뒤 새로 짓는다 |
+| `make_export.sh` | `run.sh` 가 컨테이너만 넘김, `-m` 없음, `-cpu cortex-a76` 고정, 시간 한도 20초 | 합성 매체를 `-drive` 로 넘기고 `-m 2G`(회차와 같음). 시간 한도는 회차가 쓴 값(기본 200초, `RUN_TIMEOUT_S` 로 덮음), `handoff_tick` 이 있는 머신은 `-accel tcg,thread=single`, `-cpu` 는 `CPU` 를 줄 때만(혼합 머신은 주지 않음). `BUNDLE_FIRMWARE=0` 은 펌웨어 없이 해시 기록만 둔다. `build.sh` 가 계열 패치 세트를 적용 |
+| 키트 완료 조건 | "6/6 REAL" | 게이트 3/3 + 목표 마일스톤 + 검증 우회 건수 명시. F2 의 최종 칸은 `kernel_alive` |
+| `INPUT.md` · `.active` (2차) | 쓰는 곳이 없었다. `status` · `export` 가 읽는 `model` · `target` · `build` 가 비었다 | `start` 가 언팩 뒤에 슬롯표를 쓰고(출처가 없으면 `unknown`) `.active` 를 쓴다. `status` · `export` 는 슬롯이 없으면 `PROGRESS.md` 머리말로 대신하고 표시한다 |
+| 아키텍처 (2차) | 스킬이 `arch` 를 넘기지 않고, 파이프라인 기본값 arm64 가 AArch32 이미지를 오류 없이 읽을 수 있었다 | `start` 가 `stage_map.py --detect-arch` 로 첫 컨테이너를 도출해 근거와 함께 기록하고 넘긴다. 파이프라인은 명시값을 따르고 `unknown` 이면 다시 묻고, 그래도 `unknown` 이면 임시 arm64 로 지도를 도출해 시그니처가 없을 때 근거와 함께 `BLOCKED_ARCH` |
+| 커널 자산 (2차) | static-analyzer 가 사용자에게 `extract_boot_assets.sh` 를 부르라고 했다 (기본 F2 실행이 사람을 기다리는 `BLOCKED_ASSET`) | 파이프라인이 F2 이상에서 Analyze 앞에 그 스크립트를 부른다. 종료코드 4(super 만 실패)는 부분 적재. `BLOCKED_ASSET` 은 적재한 뒤에도 없을 때만 |
+| 재개 (2차) | 회차 번호가 1 부터 다시 시작해 이전 회차의 로그를 덮고 `rounds.jsonl` 에 같은 번호가 생겼다 | 그 워크스페이스의 마지막 번호 다음부터 이어서 매긴다. `runtime_round_cap` 은 이번 실행의 회차만 센다 |
+| `BLOCKED_KO` (2차) | 정본이 말하는 정지 코드인데 세우는 코드가 없었다 | F2 이상에서 분석가의 `storage_driver.form=absent` 일 때 파이프라인이 세운다 |
+| 호스트 줄 (2차) | 메모리 덤프 계획이나 리셋 패턴이 있을 때만 `host_N.txt` 로 나뉘었다 | 회차가 `qemu-system-*:` 줄을 냈으면 항상. `observation.json` 에 `kernel_log` · `host_log` 경로 (없으면 null) |
+| 쓰기 보호 영역 · 태스크 형식 (2차) | 머신 템플릿이 읽는 `REHOST_MEMDUMP_REGION` 을 내보내는 곳이 없었고 태스크 형식은 환경변수로만 바꿀 수 있었다 | 계획이 쓸 수 있으면 `run_full.sh` 가 영역을 내보낸다(없으면 설정하지 않고 환경의 옛 값도 지운다). 형식은 작업 폴더의 `kernel_task_regex.txt`. 키트 `run.sh` 도 같다 |
+| 하드웨어 해시 우회 (2차) | `hash_engine` 행은 프롬프트로만 집행됐다 | 이번 회차의 표지 `F` 해시·다이제스트·서명 우회에 사용할 수 있는 `hardware` 행이 없으면 `check_change.sh` 가 반려한다. 보고에 `verify_bypass.hash_engine` 과 (혼합 아키텍처) 주소 창 표 상태 |
+| 커맨드라인 (2차) | `build_lu.py` 가 항상 `param` 이라는 파티션에 썼다 (S-Boot 이름) | 계획이 이름 붙인 파티션에만 쓰고, 파티션에서 오지 않으면 쓰지 않고 `warning_cmdline`. 매체 종류의 근거가 없으면 `warning_medium` |
+| `init` (2차) | sudo 가 비밀번호를 요구하면 백그라운드 `apt-get` 이 아무도 모르게 영원히 기다렸다 | 설치·삭제 전에 `sudo -n true` 로 시험하고 실패하면 종료코드 7(`BLOCKED_ENV`)과 사용자가 실행할 `apt-get` 줄을 내며 멈춘다 |
+
+### 커버리지
+
+영역별 시험 `tests/parts/*.sh` 를 파일별로 단독 실행한 값 (2차 작업 뒤, 최종 점검 2026-10-06):
+`family_kit` 133 · `init_clean` 184 · `integration` 104 · `machine_tmpl` 143 · `medium` 141 ·
+`observe` 187 · `pipeline_family` 556 · `stage_map_arm32` 228 · `verify_gates` 261 · `canon` 413
+(합계 2,350). 통합 단계에서 처음 재었을 때의 값은 1,376(`family_kit` 74 · `init_clean` 154 ·
+`integration` 70 · `machine_tmpl` 122 · `medium` 87 · `observe` 110 · `pipeline_family` 209 ·
+`stage_map_arm32` 145 · `verify_gates` 157 · `canon` 248)이고 늘어난 것은 2차 작업의 시험이다.
+**전체 `tests/smoke.sh` 는 최종 점검에서 끝까지 돌렸다: 2,557 통과 / 0 실패** (통합 단계의 값은 1,534 / 0).
+`tests/uart_harness_test.py` 는 `smoke.sh` 가 부르지 않아 따로 돌렸고 통과했다. 전부 가짜 QEMU 와 합성 입력으로 돈 것이고
+`stage_map_arm32` 의 실제 이미지 시험(`SBOOT_FIXTURES`)은 이 환경에서 건너뛰었다.
+스테이지 지도와 매체 합성은 구현을 일부러 깨 보는 변이 시험으로 시험이 실패하는 것을 확인했고,
+통합 시험(`integration`)과 파이프라인 시험(`pipeline_family`)도 같은 방식으로 확인했다. 2차 작업의 각 영역도
+수정을 되돌린 사본에서 시험이 실패하는 것을 확인했다고 담당자가 보고했다 (이 정리 작업에서 다시 돌리지는 않았다).
+`canon` 의 키트 시험(회차와 `run.sh` 의 QEMU 인자 비교, 환경 전달)과 정본 문구 시험도 옛 동작으로 되돌린 사본에서
+실패하는 것을 확인했다.
+
+### 통합 단계에서 맞춘 것
+
+영역별 구현이 끝난 뒤 영역 사이의 인터페이스를 양쪽에서 읽어 어긋난 곳을 고쳤다.
+
+- 입력 대기: 표면이 `none` 이면 하니스가 입력을 주지 않고(`--surface none`), 콘솔이 조용한데
+  머신의 수신 폴링이 계속 늘면 `waiting_for_input` 을 `observation.json` 에 싣는다. 혼합 아키텍처
+  템플릿에는 그 폴링 카운터(`REHOST-RX`)가 없어 하니스가 읽을 것이 없었다. 추가했다.
+- 말이 없는 스테이지의 진입 칸은 트레이스에서 진입 PC 가 **실행된 줄**로 보일 때만 인정한다.
+  FAR/ELR 줄에 이름만 나온 PC 는 진입이 아니다. 첫 스테이지는 머신이 CPU 를 놓은 자리라 제외한다.
+- 검증 보고의 펌웨어 상태 문자열을 스크립트에서 모두 뺐다(벤더 문자열 금지). `status_tokens.txt`
+  (static-analyzer 가 도출)와 `--status-token` 에서만 온다. **자동 보고가 이전보다 약해졌다.**
+- `sync_machine.sh`: `machine_full.c` 가 `hw/arm/<기계>.c` 로 매핑되지 않던 것(Build 가 그 이름으로
+  복사하라고 하는 소스를 동기화가 못 찾았다)과, 사라진 소스의 줄이 `qemu_targets.txt` 에 남던 것.
+- `stage_map.py --merge`(이미지마다 돌린 지도를 합친다), `carve_check` 가 컨테이너 헤더가 선언한
+  크기를 보는 것(실제 프리로더가 `is_full: False` 로 나오던 것), `-accel tcg,thread=single`(혼합
+  머신만), 게이트 1 이 게스트 메모리 쓰기 위치를 보고로 싣는 것.
+- 문서 대 코드: `patch_kernel.py` 는 세 번째 인자 `kernel_patch_sites.json` 을 받는다(문서는 코드에
+  없는 PATCHES 표를 말했다). 여섯 fixer 프롬프트에 장부 규칙 문장. `.gitignore` 의
+  `examples/a136u-mt6833` 예외.
+
+### 리뷰에서 고친 것
+
+독립 리뷰가 지적하고 재현으로 확인한 것 가운데 정본·스킬·내보내기 쪽이다.
+
+- **재현 키트가 회차의 조건으로 돌지 않았다** (`make_export.sh`). `run.sh` 에 `-accel tcg,thread=single`
+  이 없었고(혼합 아키텍처 머신), 시간 한도가 20초라 체인이 커널까지 가기 전에 끝나 `kernel_alive` 를
+  관측할 수 없었고, 회차가 주지 않는 `-cpu cortex-a76` 을 고정으로 넘겨 그 CPU 를 허용하지 않는 머신은
+  QEMU 가 거부했다. 지금은 회차와 같은 조건이다. `canon.sh` 가 같은 워크스페이스로 `run_full.sh` 와
+  `run.sh` 를 모두 돌려 QEMU 인자를 비교한다.
+- **`start` 가 `arch` 를 입력으로 넘기던 것.** 값을 정하는 규칙이 없고 파이프라인의 기본값이 arm64 라서
+  AArch32 이미지가 오류 없이 AArch64 `exec` 스테이지로 읽혔다. 리뷰 시점에는 스킬이 `arch` 를 넘기지 않고
+  도출한다고만 적었고 **그 도출은 들어 있지 않았다.** 2차 작업이 `stage_map.py --detect-arch` 와 파이프라인의
+  도출 경로를 넣었다 (위 표의 "아키텍처").
+- **정본 §11 예외**: 위 "정본이 바뀐 곳" 의 서술을 규칙의 완화로 고쳐 적었다.
+
+### 2차 작업 — 감사에서 확인된 항목
+
+리뷰 뒤에 한 번 더, 코드와 문서가 "플러그인은 순서·근거·측정을 주고 에이전트가 수행한다. 사용자는 단계마다 프롬프트를
+넣지 않는다"는 원칙에서 벗어난 곳을 감사해 확인된 것을 영역별로 고쳤다. **버전은 올리지 않았다** (0.28.0 미배포).
+
+| 영역 | 변경 | 주요 파일 |
+|---|---|---|
+| `init` | sudo 가 비밀번호를 요구하면 설치·삭제 전에 종료코드 7 로 멈춘다 (`--dry-run` 이 같은 점검, 계획 JSON 의 `apt`). root 는 `sudo` 없이 `apt-get` | `scripts/setup_env.sh`, `skills/init/SKILL.md` |
+| `start` | 언팩 뒤에 `INPUT.md` 슬롯표(`model` · `build` · `target` · `bootloader_path` · `has_super` · `arch` · `bl_surface` · `soc_family` 와 근거)와 `.active` 를 쓴다. 값마다 출처가 있고 없으면 `unknown`. `arch` 는 첫 컨테이너의 `--detect-arch`. `status` · `export` 는 슬롯이 없으면 `PROGRESS.md` 로 대신하고 표시한다. 커맨드라인은 계획이 이름 붙인 파티션에 쓴다고 정정 | `skills/start/SKILL.md` · `skills/status/SKILL.md` · `skills/export/SKILL.md` |
+| 스테이지 지도 | `--detect-arch <경로>`: 한 줄 JSON(`arch` · `entry_signature` · `basis` · `confidence`), 구조적 시그니처가 있어야만 이름을 대고 `unknown` 이 정직한 답. `extract_boot_assets.sh` 는 비대화형 · 멱등 · 종료코드 0~4 · 고정 요약 줄 · `xxd` 불필요 · 잘린 boot.img 거부 | `scripts/stage_map.py`, `scripts/extract_boot_assets.sh` |
+| 파이프라인 | 아키텍처 입력 또는 도출(`unknown` 을 기본값으로 대신하지 않음), 커널 자산을 파이프라인이 적재, 재개 때 회차 번호 이어 매기기, `BLOCKED_KO` 방출(분석가의 `storage_driver`), 가이드 · 계열 자료 경로를 절대 경로로, 이미지별 `--detect-arch` 안내, `hash_engine` · 주소 창 표 보고, `kernel_log` · `host_log` | `workflows/pipeline.js` |
+| 관측 | `run_full.sh` 가 `REHOST_MEMDUMP_REGION` 을 내보내고(계획이 없으면 설정하지 않음) `kernel_task_regex.txt` 를 스캔에 넘긴다. 호스트 줄은 매 회차 `host_N.txt` 로. `observation.json` 에 `kernel_log` · `host_log`. `RESUME.md` 에 마지막 회차의 로그 경로. 환경변수 `KERNEL_TASK_REGEX` 가 틀린 정규식이면 모든 `memdump_observe.py` 명령이 죽던 것 | `scripts/run_full.sh`, `scripts/run_round.sh`, `scripts/fingerprint_lib.sh`, `scripts/memdump_observe.py`, `scripts/make_resume.py` |
+| 검증 | 이번 회차의 표지 `F` 해시·다이제스트·서명 우회에 `0x` 근거가 있는 `hardware` 행(`STATIC.md` 의 `hash_engine`)이 없으면 `check_change.sh` 가 반려(종료코드 2). 보고에 `verify_bypass.hash_engine`. 혼합 아키텍처 머신의 주소 창 표를 참고 지표(`address_windows`)로. 게이트는 셋 그대로 | `scripts/verify_gates.py`, `scripts/verify.py`, `scripts/check_change.sh`, `agents/verifier.md` |
+| 매체 | `medium` 키가 없을 때도 `warning_medium`(UFS 기본값은 이전 호환이지만 조용하지 않다). 커맨드라인은 계획의 `partition`(선택 `offset`) · `source` · 매니페스트 `cmdline_partition` 순으로 파티션을 정하고, 해당 없으면 쓰지 않고 `warning_cmdline` | `scripts/build_lu.py` |
+| 가이드 | 진행 가이드를 사다리 순서로 재정렬(S4 체인, S5 매체, S6 부트로더, S7 `kernel_alive`, S8 `userspace`, S9 `partitions_up`), 분류기 · supervisor 의 사다리 표를 `goalsFor()` 와 맞춤, 담당 열은 여섯 fixer 이름 또는 `build`, `hash_engine` 행의 모양(`static-analyzer.md` 14d), 장부 규칙은 "새로 쓰거나 고친 기록만"이라고 일곱 fixer 에 같은 문장 | `knowledge/runbook_mediatek.md`, `agents/*.md`, `fixers/registry.yaml`, `knowledge/faults_*.md` |
+| 키트 | `run.sh` 가 회차처럼 `REHOST_MEMDUMP_REGION` 을 내보내고 `kernel_task_regex.txt` 를 가져간다. 기본 CPU(`cortex-a76`)는 0.28.0 리뷰에서 이미 없앴고 `CPU` 를 줄 때만 `-cpu` 를 넘기는 것은 그대로다 | `scripts/make_export.sh` |
+| 기록 회전 (최종 점검) | `STATIC.md` 회전이 오래된 재도출 하위 절의 `hash_engine` 행과 주소 창 표를 보관 파일로 보내 검증의 `hash_engine` 상태가 `hardware` 에서 `absent` 로 바뀌었다 (다음 표지 `F` 해시 우회가 반려됐다). 정지점 행처럼 본문으로 올리되 `verify_gates.py` 의 같은 파서로 읽어 그대로 옮긴다 (파일 순서 유지: 마지막 행이 이긴다). 본문 정지점 표는 머리 줄이나 담당 열이 있는 첫 표로 찾아서, 옮겨 온 표가 그 표를 끊지 않는다 | `scripts/static_rotate.py` |
+
+**2차 작업이 닫지 못해 남긴 것** (담당 파일이 이 정리의 범위 밖이었다. 상세와 근거는 삭제된 설계 문서 status §11 에 있었다):
+`scripts/derived_facts.py` 가 `hash_engine` 행을 "새 사실"로 세지 않는다 (C12), `agents/static-analyzer.md` 14a 가 `partition`
+키를 말하지 않는다 (C13), 가이드의 태스크 정규식 서술이 코드(검색, 처음 64자)와 다르다 (C14), 파이프라인이 분석가의
+`has_super` 를 되읽지 않는다 (A20), 링 용량이 없는 영역의 두 경로가 어긋난다 (D7), `agents/static-analyzer.md` 14d 와 에스컬레이션 프롬프트가
+`hash_engine` 행을 어느 절에 쓸지 말하지 않아, `## 해시 계산 위치` 를 파일 끝에 덧붙이면 그 뒤에 덧붙는 재도출 하위 절의 정지점 행이
+`## 도출된 정지점` 절 밖에 놓여 읽히지 않는다 (C16 의 ②. 회전이 `hash_engine` 행과 주소 창 표를 보관 파일로 보내던 ①은 최종 점검에서
+`scripts/static_rotate.py` 를 고쳐 닫았고 시험 `canon` 8b 가 잡는다).
+
+### 확인하지 못한 것
+
+- **QEMU 에서 실행한 것이 없다.** 이번 변경 어느 곳도 실제 QEMU 로 돌려 보지 않았다.
+  메모리 덤프 관측기는 가짜 모니터 서버로만, 혼합 아키텍처 머신 템플릿은 QEMU 10.2.2 헤더에 대한
+  컴파일만 확인했다. `cpu.c` 패치가 TCG 의 AArch32 CPU 생성을 실제로 여는지는 바이너리를 못 만들어 모른다.
+- **플러그인이 MediaTek 기기를 처음부터 끝까지 진행한 적이 없다.** 근거는 한 기기(SM-A136U)의
+  수작업 키트와 그 재현 실행이고, 다른 SoC 에서의 일반성은 확인하지 않았다. 키트의 `08_docs` 자료는
+  입수하지 못해 arm32 도출은 실제 LK·프리로더 이미지와 디스어셈블 근거로 다시 구현했고, 임계값은 그 이미지에
+  맞춰 정했다.
+- **`workflows/pipeline.js` 는 합성 에이전트로만 돌려 봤다.** 실제 워크플로 런타임 · 실제 LLM ·
+  QEMU 로는 돌리지 않았다. 항목별 현황은 삭제된 설계 문서 status §11-A 에 있었다.
+- **입력 대기(`waiting_for_input`) 판정의 기준값**(최종 구간 길이, 폴링 증가)은 측정한 값이 아니다.
+  머신이 수신 폴링을 드물게 보고하므로(첫 폴링과 약 100만 회마다) 보고 사이 증가로 판단한다.
+- **프리로더의 `is_full`** 은 GFH 가 선언한 길이를 GFH 위치에서부터 센 값으로 비교한다. 그 필드의
+  기준점이 GFH 시작인지 페이로드 시작인지는 한 이미지로만 봤다 (틀려도 더 엄격해질 뿐이다).
+- `-accel tcg,thread=single` 은 혼합 머신에만 건다. 다중 스레드 TCG 에서 핸드오프 감시기가 안전한지는
+  모른다. 매체가 eMMC 일 때의 컨트롤러 골격 템플릿은 만들지 않았다.
+- capstone 이 없는 Python(예: macOS 기본 3.9)에서는 `carve_disasm.py` 와 `stage_map_arm32` 의 일부 시험이
+  돌지 않는다. 시험은 그 경우를 건너뛴다고 말한다.
+- 게이트 2 를 전체 참조 집합(수 GB)에 돌리지 못했다. 시간 예산 안에 끝나는지 모른다.
+- **하드웨어 해시 엔진 모델링이 가능한지는 시험하지 않았다.** 정본 §11 예외의 첫 단계는 실현 가능성이
+  미검증이다.
+- **정본 §11 의 하드웨어 해시 예외는 사용자의 결정 없이 들어갔다.** 잠정이라고 적었고, 선행 조건(`STATIC.md`
+  의 `hash_engine` 도출 행)의 기계 검사는 처음에는 없었고 2차 작업에서 행의 유무와 모양만 구현됐다. 사용자가 Q3 에
+  답해야 확정되거나 지워진다.
+- 실제 Linux · WSL 에서의 QEMU 18분 빌드와 GNU tar, 메모리 덤프의 `pmemsave` 지연,
+  `console=ttyS0` 인데도 UART 가 침묵하는 원인은 확인하지 못했다.
+- **2차 작업도 QEMU 로 돌리지 않았다.** 파이프라인의 새 경로(아키텍처 도출, 커널 자산 적재, 회차 번호 재개, `BLOCKED_KO`)는
+  합성 에이전트와 실제 스크립트로만 시험했고 실제 워크플로 런타임 · 실제 LLM 으로는 돌리지 않았다.
+- `--detect-arch` 의 임계값은 **실제 AArch32 이미지 둘과 합성·무작위 입력**으로 맞췄다. **실제 AArch64 부트로더로는 맞추지
+  못했다.** 이 환경에서 실제 이미지 시험(`SBOOT_FIXTURES`)은 건너뛰었다.
+- **`INPUT.md` 슬롯표와 `.active` 는 스킬 지시를 읽은 에이전트가 쓴다.** 스크립트가 아니라서 시험은 지시 문구가 코드와
+  맞는지만 본다. 에이전트가 실제로 올바르게 쓰는지는 확인하지 못했다.
+- 하드웨어 해시 선행 조건의 기계 검사는 **행의 유무와 모양만** 본다. 행을 누가 썼는지, (a) 가 정말 불가능했는지,
+  `hash` · `digest` · `signature` 계열의 말이 없는 기록은 보지 못한다 (설계 문서 status D6, 0.29.1 에서 삭제).
+- 실제 Linux 에서 `init` 이 sudo 사전 점검을 지나 apt 설치까지 가는 경로, 키트 `run.sh` 가 낸 `REHOST_MEMDUMP_REGION` 을
+  실제 머신이 읽고 쓰기를 거부하는지는 확인하지 못했다 (가짜 `sudo` · 환경을 찍는 가짜 QEMU 로만).
+- `examples/a136u-mt6833/` 는 `.gitignore` 예외를 넣었으나 **커밋하지 않았다.**
 
 ---
 

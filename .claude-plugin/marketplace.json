@@ -8,8 +8,8 @@
     {
       "name": "sboot-rehost",
       "source": "./",
-      "description": "Firmware rehosting — one continuous chain from the bootloader container's first stage to the kernel mounting rootfs, autonomous by default. Mobile SoCs (Exynos, MediaTek, ...).",
-      "version": "0.27.0",
+      "description": "Firmware rehosting: one continuous chain from the bootloader container's first stage to the kernel mounting rootfs, autonomous by default. Exynos is the reference family; MediaTek is supported at the guide level (derived from one device, not yet run end to end).",
+      "version": "0.29.2",
       "category": "reverse-engineering",
       "tags": [
         "qemu",
@@ -18,6 +18,7 @@
         "bootloader",
         "kernel",
         "ufs",
+        "emmc",
         "arm64",
         "exynos",
         "mediatek"

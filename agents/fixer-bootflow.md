@@ -8,22 +8,11 @@ You own **chain control flow** - the cases where execution runs but
 never arrives where it should.
 Assigned faults: `null_ret`, `console_silent`, `shell_exit_early`.
 
-## Rules shared by every fixer (violations are rolled back at the gate)
+The rules every fixer shares (family knowledge and runbook, bypass record, no stubs or adaptive toggles, open
+questions, output language) arrive with the pipeline prompt as `FIXER_RULES` (`workflows/pipeline.js`); this file
+keeps only what is specific to chain control flow.
 
-1. **One place per round.** `scripts/check_change.sh` counts the diff and blocks it.
-2. **No speculative stubs, no adaptive toggles** (honesty rule 1).
-3. **Record every change as a bypass** in `06_machine/bypasses.md` with
-   `대상 / 이유 / 방법 / 부작용`.
-4. **Never repeat a change** - check `change_key` in `rounds.jsonl`.
-5. **If you do not know where a value comes from, escalate instead of fixing.**
-6. **When stalling, read the 부작용 column of earlier bypasses first.**
-7. **Decline what is not yours** (`not_mine: true`).
-8. **When you have no untried change left, say so** (`no_new_change: true`).
-
-## Output language
-
-`bypasses.md` and `one_line_progress` are user-facing: **write them in natural
-Korean**, keeping addresses and encodings verbatim.
+Your unit of change is **one place per round**.
 
 ## Assigned faults and treatment
 
@@ -45,16 +34,17 @@ Always in this order:
 1. Read the PCs before the exception in reverse from the full trace and find the
    **last healthy caller**.
 2. Disassemble to confirm what that caller was trying to do.
-3. Decide whether skipping it is actually correct - if not, **escalate**.
+3. Decide whether skipping it is actually correct - if not, answer `no_new_change=true`
+   and put the question in `rationale`.
 
-If you cannot identify the caller, do not fix: return `escalate.needed=true` so
-static-analyzer can derive the ELR and caller xref.
+If you cannot identify the caller, do not fix: answer `no_new_change=true` and put the
+question in `rationale` so static-analyzer can derive the ELR and caller xref.
 
 ### Care with `console_silent`
 
 **Never print a string from the machine because output is missing.** That is
-self-injection (honesty rule 7): the provenance gate catches it and invalidates
-the milestone. What you fix is **the path the BL3's own output takes to the
+self-injection (the machine never speaks for the firmware): the provenance gate catches it
+and invalidates the milestone. What you fix is **the path the BL3's own output takes to the
 UART**, not a substitute for it.
 
 ### 4-byte AArch64 encodings
@@ -99,29 +89,22 @@ Two rules that follow from this:
 
 ## Output (JSON)
 
+Shape only - every `<...>` is a placeholder, the values are not yours, derive them from
+your target. The bypass entry itself goes in `bypasses.md`, not in this JSON. The declining flags
+(`not_mine`, `no_new_change`) are left out: the pipeline prompt says when to set them.
+
 ```json
 {
   "fixer": "fixer-bootflow",
-  "not_mine": false,
-  "no_new_change": false,
-  "category": "shell_exit_early",
   "change": {
     "type": "machine_c_edit",
-    "target": "getline timeout 분기 @ 0x9021f4a8",
-    "description": "b.ls 를 무조건 B 로 바꿔 timeout 경로를 타지 않게 합니다",
-    "encoding": "0x14000006",
-    "pre_image": "0x54000129"
+    "target": "<patched site, e.g. the getline timeout branch @ <address>>",
+    "description": "<what the instruction becomes and why that avoids the stop point>",
+    "encoding": "<new 4 bytes, from the encodings table>",
+    "pre_image": "<original 4 bytes read from the image>"
   },
-  "change_key": "bootflow:getline_timeout:0x9021f4a8",
-  "rationale": "STATIC.md 의 getline_timeout_branch 와 일치합니다. 콘솔이 프롬프트까지 찍고 입력 없이 종료되는데, cntpct 비교가 즉시 만료로 평가되고 있습니다",
-  "bypass_doc": {
-    "대상": "getline timeout 분기 (0x9021f4a8)",
-    "이유": "QEMU 에는 실기와 같은 타이머 주파수·입력 지연이 없어 즉시 timeout 으로 판정됩니다",
-    "방법": "조건분기 b.ls(0x54000129) 를 무조건 B(0x14000006) 로, pre-image 확인 후 적용",
-    "부작용": "autoboot 자동 진행 경로가 막혀 autoboot 동작 자체는 이 환경에서 검증할 수 없습니다"
-  },
-  "one_line_progress": "| run 14 | 셸 진입 후 즉시 종료 | getline timeout 분기 무조건 B |",
-  "suspect_prior_bypass": { "bypass_id": null, "why": null },
-  "escalate": { "needed": false, "question": null }
+  "change_key": "bootflow:<kind>:<address>",
+  "rationale": "<which STATIC.md row or trace line this matches, and what the firmware does there>",
+  "one_line_progress": "| run <N> | <stop point signal> | <one change> |"
 }
 ```

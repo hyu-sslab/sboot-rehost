@@ -1,16 +1,31 @@
 # fixers/registry.yaml - maps a fault name to the fixer that owns it.
 #
 # fault-classifier names the stop point and then looks the owner up here.
-# The pipeline only reads this file, so **adding a fixer is one agent file plus a
-# few lines here** - the orchestration code never changes.
+#
+# Who reads this file: the AGENTS. fault-classifier ranks owners from it and supervisor
+# reads it before it prescribes; workflows/pipeline.js only hands them its path (it does
+# not parse it); no script parses it either. tests/parts/family_kit.sh reads it to check
+# its rows against the knowledge tables.
+#
+# What it does NOT drive: the set of fixers the pipeline will actually call is the
+# hard-coded KNOWN_FIXERS list in workflows/pipeline.js (and tests/smoke.sh asserts that
+# list). So:
+#   - a stop point for an EXISTING fixer is one name added to its `handles` here, and
+#     nothing else;
+#   - a NEW fixer is not "one file and a few lines": it needs its agent file, a block
+#     here, AND an entry in KNOWN_FIXERS (with the smoke assertion). A fixer registered
+#     only here is never asked.
 #
 # Rules
 #   - One fault may list several candidate owners; fault-classifier ranks them.
-#     Only the top-ranked fixer runs in a given round (one round, one change).
-#   - **A fault that is not listed here goes to no fixer at all.** It goes to
-#     static-analyzer for derivation. There is deliberately no catch-all fixer,
-#     because a wrong guess here produces something that boots plausibly but is
-#     fake (honesty rule 1).
+#     The pipeline asks up to three candidates in order (supervisor's pick, then
+#     the ranking, then the owner named in STATIC.md); the first one that makes a
+#     change runs and the rest are not asked, so one round is still one change.
+#   - **A fault that is not listed here goes to no fixer at first.** It goes to
+#     static-analyzer for derivation. There is deliberately no catch-all
+#     SPECIALIST: fixer-general is reached only after every ranked specialist has
+#     declined (reached_by: decline_only), never as a first guess, because a wrong
+#     guess here produces something that boots plausibly but is fake (honesty rule 1).
 #
 # The split is by **owned faults plus the tools used**, not by layer or track.
 # smc_undef shows up on both tracks, but the repair is identical, so fixer-el3
@@ -44,7 +59,8 @@ fixers:
 
   fixer-kernel:
     description: kernel .text patches, GIC wiring, rootfs path
-    handles: [security_gate, kernel_oops, gic_ppi, rootfs_mount]
+    handles: [security_gate, kernel_oops, gic_ppi, rootfs_mount,
+              coprocessor_ipi_timeout, softdog_expired]
     knowledge: [knowledge/faults_unified.md, knowledge/kernel_gates.md]
     tools: [capstone, fdtdump, patch_kernel.py]
     edits: [machine_full.c, patch_kernel.py]
@@ -68,6 +84,16 @@ fixers:
       # or key store is a defect in what we synthesised - not a track boundary.
       - partition_table_unavailable
       - keystore_partition_missing
+      # eMMC (MSDC) controller walls: the "eMMC controller" section of
+      # knowledge/faults_storage.md. mmc_partition_scan_failed is the downstream
+      # symptom that points back at them (knowledge/faults_mediatek.md).
+      - emmc_sd_probe_answered
+      - emmc_36bit_addr
+      - emmc_wp_group
+      - msdc_dma_rerun
+      - msdc_basic_len
+      - msdc_write_lost
+      - mmc_partition_scan_failed
     knowledge: [knowledge/faults_unified.md, knowledge/faults_storage.md]
     tools: [readelf, objdump, capstone, build_lu.py]
     edits: [storage_hci.c, machine_full.c, build_lu.py]
@@ -79,7 +105,24 @@ fixers:
     tools: [capstone, avbtool, build_lu.py]
     edits: [machine_full.c, build_lu.py]
 
-# No owner -> static-analyzer. There is no fallback fixer by design.
+# Last resort - never ranked by the classifier. The pipeline reaches it only
+# after a specialist declined (not_mine or no_new_change), which means the stop
+# point has no owner yet. It has no domain boundary and may edit, build and run,
+# so a mechanism that crosses what the domains split apart can be treated in one
+# round. In exchange it records each case in <workdir>/fixer_candidates.md so a
+# real specialist can be written and committed later.
+#
+# Promotion is deliberate: the agent registry is a snapshot taken at session
+# start, so an agent file written at runtime is not loadable in that run.
+  fixer-general:
+    description: last resort, no domain boundary; edits any machine source, builds and runs
+    handles: [unowned, qemu_abort]
+    knowledge: [knowledge/faults_unified.md, knowledge/faults_storage.md, knowledge/kernel_gates.md]
+    tools: [capstone, ninja, qemu]
+    edits: [any]
+    reached_by: decline_only
+
+# No owner -> static-analyzer first. fixer-general (above) is the last resort after every specialist declined; it is never the first answer.
 unmapped_policy: escalate_to_static_analyzer
 
 # Named faults that belong to no fixer because they are not about the firmware.
@@ -105,7 +148,16 @@ not_firmware: [harness_input_starved]
 #   stage_decrypt_blocked    the run reached a decrypt routine for a stage that
 #                            cannot execute here. The skip redirect is missing or
 #                            points at the wrong stage.
-build_layer: [stage_entry_el_mismatch, stage_decrypt_blocked]
+#   gic_redistributor_order  the CPU that runs the EL3 monitor was not created
+#                            first, so the interrupt controller's frame for it
+#                            is never set up and the kernel has no tick. The
+#                            premise is the machine's CPU creation order
+#                            (knowledge/faults_mediatek.md).
+build_layer: [stage_entry_el_mismatch, stage_decrypt_blocked, gic_redistributor_order]
+
+# Named on purpose with NO owner: guest_reset_after_jump is a hypothesis
+# (knowledge/faults_mediatek.md). Listing it here would send a fixer to repair
+# a cause nobody has established; it goes to static-analyzer for derivation.
 
 # --- When to split a fixer further ---------------------------------------
 # Guessing the split up front gets it wrong. Decide from the data that
@@ -114,20 +166,3 @@ build_layer: [stage_entry_el_mismatch, stage_decrypt_blocked]
 #   - the tools diverge inside one fixer       -> it is really two jobs
 #   - a fault recurs across many firmwares     -> specialising it pays off
 #   - one fault has a notably low success rate -> break it out and go deeper
-
-# Last resort - never ranked by the classifier. The pipeline reaches it only
-# after a specialist declined (not_mine or no_new_change), which means the stop
-# point has no owner yet. It has no domain boundary and may edit, build and run,
-# so a mechanism that crosses what the domains split apart can be treated in one
-# round. In exchange it records each case in <workdir>/fixer_candidates.md so a
-# real specialist can be written and committed later.
-#
-# Promotion is deliberate: the agent registry is a snapshot taken at session
-# start, so an agent file written at runtime is not loadable in that run.
-  fixer-general:
-    description: last resort, no domain boundary; edits any machine source, builds and runs
-    handles: [unowned, qemu_abort]
-    knowledge: [knowledge/faults_unified.md, knowledge/faults_storage.md, knowledge/kernel_gates.md]
-    tools: [capstone, ninja, qemu]
-    edits: [any]
-    reached_by: decline_only

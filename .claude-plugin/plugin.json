@@ -1,7 +1,7 @@
 {
   "name": "sboot-rehost",
-  "description": "Firmware rehosting helper for QEMU - ONE continuous chain: the bootloader container is loaded once and every stage after the first is reached by the firmware's own code, through to the kernel mounting rootfs. No -kernel/-dtb/-initrd handoff. Encrypted or absent stages are skipped by redirecting to the next executable stage, and every skip is documented. Runs autonomously (decisions journaled; user prompts and resolutions recorded so a stalled run can be resumed). Static analysis -> stage map -> machine generation -> fault loop -> 6/6 honesty verification. Works across mobile SoCs (Samsung Exynos, MediaTek, ...).",
-  "version": "0.27.0",
+  "description": "Firmware rehosting helper for QEMU - ONE continuous chain: the bootloader container is loaded once and every stage after the first is reached by the firmware's own code, through to the kernel mounting rootfs. No -kernel/-dtb/-initrd handoff. Encrypted or absent stages are skipped by redirecting to the next executable stage, and every skip is documented. Runs autonomously (decisions journaled; user prompts and resolutions recorded so a stalled run can be resumed). Static analysis -> stage map -> machine generation -> fault loop -> 3-gate honesty verification (a verification bypass is never silent: it is counted in the verdict). Exynos is the reference family. MediaTek is supported at the guide level only (run guide, knowledge table, arm32 stage derivation, mixed-architecture machine skeleton, eMMC medium): derived from a single device and not yet run end to end by the plugin.",
+  "version": "0.29.2",
   "author": {
     "name": "sboot-rehost contributors"
   },

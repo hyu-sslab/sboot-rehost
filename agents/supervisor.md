@@ -16,7 +16,9 @@ never edit.
 | this round's fingerprint | `<workdir>/fingerprint.json` - raw observations from the run script |
 | stop conditions | `python3 scripts/stop_conditions.py <workdir>` (JSON) |
 | round history | `<workdir>/rounds.jsonl` |
-| current goal | the rung handed to you, e.g. `shell`, `userspace`, `link_up`, `partitions_up` |
+| current goal | the rung handed to you, e.g. `<stage>_entry`, `shell`, `medium_up`, `kernel_alive`, `userspace`, `partitions_up` (the ladder in `workflows/pipeline.js`) |
+| family runbook | the prompt's `Runbook:` line (and the tables on its `Family knowledge:` line), absolute paths - the order in which this family's firmware is worked |
+| round logs | `<workdir>/observation.json` `kernel_log` (`07_logs/kernel_N.log`, the merged memory-dump kernel log) and `host_log` (`07_logs/host_N.txt`, QEMU's own lines - never guest evidence); each is `null` when the round produced none |
 
 ## Absolute rules about stopping
 
@@ -77,6 +79,35 @@ looks exactly like a firmware that read the input and declined it.
 run, so nothing is known about whether the wall is our own clock - it is not the
 same as `false`, and reading it as one is how five rounds of an unmoving console
 got treated as a firmware wall.
+
+## The family runbook
+
+When the prompt carries a `Runbook:` line, **read it before you route**, in two
+places.
+
+- **Routing.** Find which step the run is in from the observed milestone (the
+  runbook's rule 1), and let that step say what to suspect first and what the next
+  action is. It orders the work; it does not override a measured stop, a provenance
+  gate or a stop condition.
+- **Judging the layer.** The runbook names the build-layer suspects per step (CPU
+  type and creation order, entry PC, load address, the medium we synthesised). When
+  `needs_layer_review` is set, read them against `06_machine/*.c` and `stage_map.json`
+  alongside the questions below.
+
+Two things on a family whose kernel may be silent on the UART: **silence is not a
+stop**, and a quiet kernel with `channels.kernel_lines > 0` is running. And a
+`stop_conditions` verdict computed from the UART alone is still the verdict - you
+cannot route around it, but you can point out in `decision_note` that the fingerprint
+carries no kernel-channel measure.
+
+### Lines the pipeline adds to your prompt
+
+| line | what it tells you |
+|---|---|
+| `Observation channels: UART only` / `UART + memory dump` | whether a quiet UART can be a running kernel (the memory-dump channel is on) |
+| `Rungs observed so far:` | only rungs a run actually OBSERVED; a rung the loop stepped over is not in it |
+| `Surface: none - ...` | the ladder has no surface rung and autoboot is `pending` or `observed`. The pipeline stops on a round OBSERVED parked on the console (polling it, nothing new, round after round) and never on the derivation that there is no surface |
+| `Build warnings (each is a premise nobody derived): ...` | what `build_lu.py` reported (an undecided medium, a zero entry with no size, duplicate partition names). Each is a build-layer suspect before any loop change |
 
 ## Goal advancement is measured, not claimed
 
@@ -169,10 +200,14 @@ Ask specifically:
 - Do the entry PC and load address match what the analyst derived, including any
   correction made in a later round?
 - Are the accumulated bypasses treating symptoms of one shared cause?
+- In a chain with more than one CPU: is the CPU that runs the EL3 monitor the one
+  created first? A kernel that never gets a timer tick, with the CPUs idle and no
+  exception storm, is this premise and not a peripheral.
 
 ### Routing `rebuild`
 
-Only with a **concrete, previously untried** change:
+Only with a **concrete, previously untried** change. Shape only (example of the shape from
+one device - the values are not yours, derive them from your target):
 
 ```json
 { "route": "rebuild", "layer": "build",
@@ -198,6 +233,9 @@ A bypass is a hypothesis about the hardware. Some of them are wrong, and until
 now nothing could remove one: every later change then rested on a model already
 known to be false, and the bypass list that verification item 5 reports stopped
 being an honest account of the machine.
+
+Shape only (example of the shape from one device - the values are not yours, derive them from
+your target):
 
 ```json
 { "route": "revert",
@@ -256,6 +294,9 @@ that is `static-analyzer`, not `fixer-general`: a fixer with unlimited scope and
 understood mechanism is exactly the guessing the honesty rules forbid.
 
 ## Output (JSON)
+
+Shape only (example of the shape from one device - the values are not yours, derive them from
+your target):
 
 ```json
 {

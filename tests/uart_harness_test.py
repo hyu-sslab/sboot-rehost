@@ -145,6 +145,61 @@ def main():
                             "empty_poll_budget": 0, "source": "derived",
                             "gate_addr": "0xf4844f7c"})
 
+    # G - CC4: no input_plan.json means no derived gate. The harness must NOT offer an
+    # interrupt pattern of its own (there used to be a default of three carriage
+    # returns): a gate that wants a run of bytes simply stays shut, and the summary says
+    # the plan was absent instead of the run looking like it had been given one.
+    name, got, wd = run_case(
+        "G 계획 파일이 없다 → 인터럽트 패턴을 한 바이트도 보내지 않는다",
+        ["--gate-at", "0.5", "--gate-count", "3",
+         "--prompt", PROMPT, "--run", "2.5", "--rx-report"],
+        timeout=2.5, plan=None)
+    ok &= check(name, got, {"source": "absent", "plan_note": "no input_plan.json",
+                            "bytes_sent": 0, "supply_attempts": 0, "input_offered": False,
+                            "input_starved": False, "prompt_seen": False,
+                            "command_sent": False, "count": 0, "pattern": ""})
+    with open(os.path.join(wd, "input.txt"), encoding="utf-8") as fh:
+        inlog = fh.read()
+    if "인터럽트 패턴: 없음" in inlog and "autoboot 중단 시도" not in inlog:
+        print("[PASS] G2 입력 기록이 '패턴 없음' 을 말하고 보낸 시도가 없다")
+    else:
+        print("[FAIL] G2 입력 기록이 '패턴 없음' 을 말하지 않거나 시도가 남아 있다")
+        ok = False
+
+    # H - a plan that exists but is not a usable gate is the same as no plan: `bytes`
+    # and `count` are both required, and neither is completed from a default.
+    for label, bad in (
+            ("bytes 만 있고 count 가 없다", {"autoboot_interrupt": {"bytes": "\\r"}}),
+            ("count 만 있고 bytes 가 없다", {"autoboot_interrupt": {"count": 3}}),
+            ("count 가 0 이다", {"autoboot_interrupt": {"bytes": "\\r", "count": 0}}),
+            ("autoboot_interrupt 가 비었다", {"autoboot_interrupt": {}}),
+            ("객체가 아닌 계획", [1, 2, 3])):
+        name, got, _ = run_case(
+            f"H 쓸 수 없는 계획({label}) → 기본값으로 채우지 않고 보내지 않는다",
+            ["--gate-at", "0.5", "--gate-count", "3",
+             "--prompt", PROMPT, "--run", "1.8", "--rx-report"],
+            timeout=1.8, plan=bad)
+        ok &= check(name, got, {"source": "absent", "bytes_sent": 0, "supply_attempts": 0,
+                                "prompt_seen": False, "command_sent": False})
+
+    # I - no derived gate does not mean no command: a bootloader with no gate shows its
+    # prompt by itself, and the harness - which keeps watching for it - still types the
+    # command exactly once. That is the only input it ever gave (no interrupt before it).
+    name, got, _ = run_case(
+        "I 게이트가 없는 펌웨어 + 계획 없음 → 프롬프트가 보이면 명령만 한 번 보낸다",
+        ["--gate-at", "0.5", "--gate-count", "0",
+         "--prompt", PROMPT, "--run", "2.5", "--rx-report"],
+        timeout=2.5, plan=None)
+    ok &= check(name, got, {"source": "absent", "prompt_seen": True, "command_sent": True,
+                            "command_blind": False, "supply_attempts": 0,
+                            "bytes_sent": len(b"help\r"), "input_offered": True,
+                            "input_starved": False})
+    if "Following commands are supported" not in got["_console"]:
+        print("[FAIL] I2 명령이 실행되지 않았습니다")
+        ok = False
+    else:
+        print("[PASS] I2 명령이 실행되었다")
+
     print()
     print("전부 통과" if ok else "실패한 항목이 있습니다")
     return 0 if ok else 1

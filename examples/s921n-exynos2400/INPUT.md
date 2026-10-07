@@ -1,7 +1,7 @@
-# INPUT — sboot-rehost 0차 입력 (예시: SM-S921N)
+# INPUT — 옛 슬롯표의 예 (SM-S921N)
 
-> 이 INPUT.md 는 worked example 의 입력값. `/sboot-rehost:rehost-setup` 이 새 펌웨어로
-> 워크스페이스에 동일 구조 파일을 자동 생성한다.
+> 통합 체인 이전의 슬롯 구성을 채운 예다 (`track` · `bl3_path` 같은 슬롯은 지금은 없다). 지금의 `INPUT.md` 는 `start` 가
+> 워크스페이스에 쓴다 (CLAUDE.md §15). 값은 이 기기의 것이고 다른 펌웨어에는 쓰지 않는다. 구조를 보는 용도로만 둔다.
 
 | 슬롯 | 값 |
 |---|---|
@@ -10,26 +10,17 @@
 | model | SM-S921N |
 | soc | Exynos 2400 (ARMv9) |
 | build | S921NKSUEDZDR |
-| md5 | 1bf5599c740632f6497122911dcdc529 |
-| file_size | 8401712 |
-| carrier | OKR |
 | target | A (help) |
-| bl3_path | /path/to/sboot_bl3_full.bin |
+| bl3_path | /path/to/<carved BL3 image> |
 | workdir | /path/to/workdir |
-| refs | (다른 분석가의 sm_s921b.c 경로) |
+| refs | (다른 분석가의 참조 구현. 이 저장소에 없다) |
 | has_el3_guess | false |
 | has_el2_guess | true |
 | qemu_dir | ~/qemu-build/qemu-10.2.2 |
 
 ## 참고
 
-이 펌웨어로 셸 도달까지 풀이된 회상은
-[../../methodology/worked_example.md](../../methodology/worked_example.md).
+이 기기에서 관측한 콘솔 출력의 예는 [EXPECTED_OUTPUT.txt](EXPECTED_OUTPUT.txt) 이다. 값의 예이지 통과 기준이 아니다.
 
-기대 결과는 [EXPECTED_OUTPUT.txt](EXPECTED_OUTPUT.txt) (308 bytes).
-
-새 환경에서 처음부터 재현하려면:
-1. 같은 md5 의 sboot_bl3_full.bin 확보 (samfw.com 의 본인 기기용 펌웨어)
-2. `bl3_path` 와 `workdir` 를 본인 경로로 수정
-3. 이 INPUT.md 를 `<workdir>/INPUT.md` 로 복사
-4. Claude Code 에서 `/sboot-rehost:rehost-sboot` 호출 (트랙 1)
+다른 펌웨어에서 같은 구조를 만들려면 그 펌웨어의 이미지를 `_inbox/` 에 넣고 `/sboot-rehost:start` 를 부른다. 슬롯 값은 그 펌웨어에서
+도출하며, 이 표의 값을 옮겨 적지 않는다.

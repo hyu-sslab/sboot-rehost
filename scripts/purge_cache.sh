@@ -15,6 +15,9 @@
 #   purge_cache.sh [--keep <version>] [--dry-run]
 #
 # 종료코드: 0 최신으로 정리됨 · 1 재시작 필요 · 2 판정 불가(캐시 없음 등)
+#
+# 출력 JSON: removed/kept 는 버전 목록이고, removed_detail/kept_detail/pycache_detail 은
+# 경로와 크기(bytes)를 담는다. clean_env.sh 가 이것을 읽어 "무엇을 얼마나 지웠는지" 보고한다.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$HERE/.." && pwd)"
@@ -39,6 +42,18 @@ dry = dry == "1"
 
 def semver(v):
     return tuple(int(x) for x in re.findall(r"\d+", v or "0")[:3] or [0])
+
+
+def dir_bytes(path):
+    """Size of a tree without following symlinks - what removing it frees."""
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.lstat(os.path.join(root, name)).st_size
+            except OSError:
+                pass
+    return total
 
 
 def repo_version():
@@ -80,32 +95,42 @@ repo = repo_version()
 keep = keep_arg or repo or (max((v for v, _ in version_dirs), key=semver)
                             if version_dirs else None)
 
+# removed/kept stay version lists (callers read them); the *_detail lists carry the
+# path and size so a cleanup report can say exactly what went and what it freed.
 removed, kept, failed = [], [], []
+removed_detail, kept_detail = [], []
 for version, path in version_dirs:
     if version == keep:
         kept.append(version)
+        kept_detail.append({"version": version, "path": path})
         continue
+    size = dir_bytes(path)
     if dry:
         removed.append(version)
+        removed_detail.append({"version": version, "path": path, "bytes": size})
         continue
     try:
         shutil.rmtree(path)
         removed.append(version)
+        removed_detail.append({"version": version, "path": path, "bytes": size})
     except OSError as exc:
         failed.append(f"{version}: {exc}")
 
 # Stale bytecode in the plugin tree. A .pyc compiled from a since-edited script
 # is the same class of problem in miniature.
 pyc = 0
+pyc_detail = []
 for root, dirs, files in os.walk(plugin_dir):
     if "__pycache__" in dirs:
         target = os.path.join(root, "__pycache__")
+        size = dir_bytes(target)
         if not dry:
             try:
                 shutil.rmtree(target)
             except OSError:
                 pass
         pyc += 1
+        pyc_detail.append({"path": target, "bytes": size})
         dirs.remove("__pycache__")
 
 session = session_version()
@@ -130,8 +155,11 @@ print(json.dumps({
     "session_version": session,
     "removed": removed,
     "kept": kept,
+    "removed_detail": removed_detail,
+    "kept_detail": kept_detail,
     "failed": failed,
     "pycache_removed": pyc,
+    "pycache_detail": pyc_detail,
     "dry_run": dry,
     "needs_restart": needs_restart,
     "note": note,

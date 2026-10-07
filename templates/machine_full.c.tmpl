@@ -335,6 +335,10 @@ static const TypeInfo rehost_info = {
     .parent = TYPE_MACHINE,
     .instance_size = sizeof(RehostState),
     .class_init = rehost_class_init,
+    /* REQUIRED on QEMU 10.2.2: without it the type registers but `-M help` and
+     * `-M <name>` never find it. Declared in hw/arm/machines-qom.h (included
+     * above), defined in target/arm/machine.c. */
+    .interfaces = arm_aarch64_machine_interfaces,
 };
 
 static void rehost_register(void) { type_register_static(&rehost_info); }

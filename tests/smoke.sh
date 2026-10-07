@@ -61,6 +61,8 @@ printf 'no exceptions here\n0x9021f3dc: stp x29,x30\n' > "$ROOT/trc1.txt"
 make_qemu "$ROOT/con1.txt" "$ROOT/trc1.txt"
 printf 'S-BOOT # \x00Following commands are supported\x00help\x00' > "$WD/bl3.bin"
 printf '| shell_func | 0x9021f3dc | prompt xref |\n' > "$WD/STATIC.md"
+# 표면 칸의 관측 문자열은 도출값이다 (static-analyzer 가 쓴 파일). run_full.sh 에 내장 배너는 없다.
+printf 'shell\tS-BOOT # \n' > "$WD/milestone_tokens.txt"
 
 QEMU="$BIN/fake-qemu" bash "$S/run_round.sh" "$WD" sboot-test 1 shell "shell" "$WD/bl3.bin" help > "$ROOT/obs1.json" 2>/dev/null
 python3 -c "import json;json.load(open('$ROOT/obs1.json'))" 2>/dev/null && ok "observation.json 이 유효한 JSON" || bad "observation.json 파싱"
@@ -73,11 +75,22 @@ chk "정지 아님" "$ST" "False"
 RO=$(python3 -c "import json;print(json.load(open('$ROOT/obs1.json'))['run_ok'])" 2>/dev/null)
 chk "run_ok 참" "$RO" "True"
 
+# 도출된 토큰 파일이 없으면 어떤 배너도 표면 칸을 정하지 않는다 (같은 콘솔, 파일만 없음)
+WD1B=$(new_ws t1notok)
+cp "$WD/06_machine/machine.c" "$WD1B/06_machine/machine.c"
+cp "$WD/bl3.bin" "$WD1B/bl3.bin"
+cp "$WD/STATIC.md" "$WD1B/STATIC.md"
+QEMU="$BIN/fake-qemu" bash "$S/run_round.sh" "$WD1B" sboot-test 1 shell "shell" "$WD1B/bl3.bin" help > "$ROOT/obs1b.json" 2>/dev/null
+chk "토큰 파일이 없으면 셸 칸을 도달로 세지 않음" \
+    "$(python3 -c "import json;d=json.load(open('$WD1B/fingerprint.json'));print(d['milestone'], d['surface_not_credited'])" 2>/dev/null)" \
+    "none no derived token file"
+
 # =============================================================================
 hdr "2. 트랙 1 — 자가주입 차단 (머신이 문자열을 갖고 있음)"
 WD2=$(new_ws t1inj)
 printf 'static const char*p="S-BOOT # ";\nqemu_chr_fe_write_all(c,b,1);\n' > "$WD2/06_machine/machine.c"
 cp "$WD/bl3.bin" "$WD2/bl3.bin"
+printf 'shell\tS-BOOT # \n' > "$WD2/milestone_tokens.txt"
 QEMU="$BIN/fake-qemu" bash "$S/run_round.sh" "$WD2" sboot-test 1 shell "shell" "$WD2/bl3.bin" help > "$ROOT/obs2.json" 2>/dev/null
 M2=$(python3 -c "import json;print(json.load(open('$ROOT/obs2.json'))['milestone'])" 2>/dev/null)
 I2=$(python3 -c "import json;print(json.load(open('$ROOT/obs2.json'))['injected'])" 2>/dev/null)
@@ -226,18 +239,17 @@ J=$(python3 "$S/stop_conditions.py" "$W9")
 chk "사실 블로커 → 즉시 정지" "$(echo "$J" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stop_reason"])')" "BLOCKED_KO"
 
 # =============================================================================
-hdr "7. 검증 6/6 (verify.py)"
+hdr "7. 검증 게이트 (verify.py, 통합 흐름)"
+# 옛 --track 1/2 흐름은 없다. 자가주입(머신이 콘솔 문자열을 가짐 → UNVERIFIED)은
+# tests/parts/verify_gates.sh 의 "게이트가 실패하면 UNVERIFIED" 와 렉서 사례 A~C 가 덮는다.
 VW=$(new_ws verify)
 printf 'Following commands are supported\x00' > "$VW/bl3.bin"
 printf 'Following commands are supported\n'   > "$VW/07_logs/console_1.txt"
 printf 'qemu_chr_fe_write_all(s->chr,b,1);\n' > "$VW/06_machine/machine.c"
 printf '| shell_func | 0x9021f3dc |\n' > "$VW/STATIC.md"
 printf '0x9021f3dc: stp\n' > "$VW/07_logs/run_1.log"
-V=$(python3 "$S/verify.py" "$VW" --track 1 --bl3 "$VW/bl3.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
-chk "정상 → 6/6 REAL" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["verdict"])')" "REAL"
-printf 'const char*s="Following commands are supported";\nqemu_chr_fe_write_all(c,b,1);\n' > "$VW/06_machine/machine.c"
-V=$(python3 "$S/verify.py" "$VW" --track 1 --bl3 "$VW/bl3.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
-chk "자가주입 → FORCED" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["verdict"])')" "FORCED"
+V=$(python3 "$S/verify.py" "$VW" --target F2 --container "$VW/bl3.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
+chk "정상 → 게이트 3 항 통과 VERIFIED" "$(echo "$V" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d["verdict"], d["gates_passed"], d["gates_total"])')" "VERIFIED 3 3"
 
 # =============================================================================
 hdr "8. 측정 기록 (record.py 타입 보존)"
@@ -270,27 +282,26 @@ chk "run_ok=false 로 정직 보고" "$RF" "False"
 # =============================================================================
 hdr "11. 펌웨어 형상 다양성 (9820 사례 회귀)"
 
-# 11a. ext4 rootfs 를 K2 증거로 인정하는가 (EROFS 만 인정하던 회귀)
-EW=$(new_ws ext4); printf 'int y;\n' > "$EW/06_machine/machine_kernel.c"
-printf -- '- 대상: t\n- 이유: r\n- 방법: m\n- 부작용: s\n' > "$EW/06_machine/bypasses.md"
-printf 'Run /init\nEXT4-fs (sda): mounted filesystem\nVFS: Mounted root (ext4 filesystem) readonly\n' > "$EW/07_logs/kboot_1.txt"
-V=$(python3 "$S/verify.py" "$EW" --track 2 --target K2 2>/dev/null)
-chk "ext4 rootfs 를 K2 로 인정" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][1]["pass"])')" "True"
+# 11a. (삭제) ext4 rootfs 를 K2 증거로 인정하는가 — 그 판정은 옛 트랙 2 흐름에만 있었다.
+#      통합 흐름의 rootfs 칸은 도출한 milestone_tokens.txt 로 보며 4c 가 그 칸을 시험한다.
 
-# 11b. K3 는 partitions_up 필수 — 중간 마일스톤으로 통과 금지
+# 11b. 저장소 사다리: 커널측 파티션 열거가 없으면 이중 구동(참고 항목 6)이 서지 않고, 미완으로 보고한다.
+#      (옛 트랙 2 의 "K3 는 partitions_up 필수" 항목을 통합 흐름의 참고 항목 6 으로 옮긴 것이다.)
+#      컨테이너에는 콘솔의 낱말을 넣어 게이트 2 가 통과하게 한다 — 보고하는 것은 저장소 사다리뿐이다.
 KW=$(new_ws k3mid); printf 'int y;\n' > "$KW/06_machine/machine_kernel.c"
 printf '### b\n- **대상**: t\n- **이유**: r\n- **방법**: m\n- **알려진 부작용**: s\n' > "$KW/06_machine/bypasses.md"
-printf 'Run /init\nscsi host0: ufshcd\nPower mode change(0)\n' > "$KW/07_logs/kboot_1.txt"
-printf 'UTRD UPIU Query SCSI\n' > "$KW/07_logs/kboot_1.log"
-V=$(python3 "$S/verify.py" "$KW" --track 2 --target K3 --trace "$KW/07_logs/kboot_1.log" 2>/dev/null)
-chk "K3 중간 마일스톤은 항목2 불통과" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][1]["pass"])')" "False"
+printf 'Run /init\nscsi host0: ufshcd\nPower mode change(0)\nEFI PART\n' > "$KW/07_logs/console_1.txt"
+printf 'Run /init\x00scsi host0: ufshcd\x00Power mode change\x00EFI PART\x00[sda] Attached SCSI disk\x00sda: sda1\x00' > "$KW/fw.bin"
+V=$(python3 "$S/verify.py" "$KW" --target F2 --container "$KW/fw.bin" 2>/dev/null)
+chk "커널측 열거가 없으면 이중 구동(항목 6) 불통과 (부트로더측 접근은 있음)" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][5]["pass"])')" "False"
 chk "UFS 단계를 미완으로 보고"        "$(echo "$V" | python3 -c 'import json,sys;print("미완" in json.load(sys.stdin)["ufs_controller"]["stage"])')" "True"
-chk "마크다운 강조 우회 4항목 인식"    "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][4]["pass"])')" "True"
+chk "마크다운 강조 우회 4항목 인식"    "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][6]["pass"])')" "True"
 
-# 11c. partitions_up 도달 시 "최소 완료"
-printf 'Run /init\nscsi host0: ufshcd\n[sda] Attached SCSI disk\nsda: sda1 sda2\n' > "$KW/07_logs/kboot_1.txt"
-V=$(python3 "$S/verify.py" "$KW" --track 2 --target K3 --trace "$KW/07_logs/kboot_1.log" 2>/dev/null)
+# 11c. partitions_up 도달 시 "최소 완료", 그리고 이중 구동이 선다
+printf 'Run /init\nscsi host0: ufshcd\n[sda] Attached SCSI disk\nsda: sda1 sda2\nEFI PART\n' > "$KW/07_logs/console_1.txt"
+V=$(python3 "$S/verify.py" "$KW" --target F2 --container "$KW/fw.bin" 2>/dev/null)
 chk "partitions_up → 최소 완료" "$(echo "$V" | python3 -c 'import json,sys;print("최소 완료" in json.load(sys.stdin)["ufs_controller"]["stage"])')" "True"
+chk "  커널측 열거가 있으면 이중 구동(항목 6) 통과" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][5]["pass"])')" "True"
 
 # 11d. 소스 negative — 주석·#include 는 출력이 아니다
 CW=$(new_ws srcneg)
@@ -299,8 +310,8 @@ printf 'autoboot error\n' > "$CW/07_logs/console_1.txt"
 printf 'x\x00autoboot\x00error\x00' > "$CW/bl3.bin"
 printf '| shell_func | 0x1234abcd |\n' > "$CW/STATIC.md"
 printf '0x1234abcd: stp\n' > "$CW/07_logs/run_1.log"
-V=$(python3 "$S/verify.py" "$CW" --track 1 --bl3 "$CW/bl3.bin" --trace "$CW/07_logs/run_1.log" 2>/dev/null)
-chk "주석·#include 는 누출로 안 셈" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][2]["pass"])')" "True"
+V=$(python3 "$S/verify.py" "$CW" --target F2 --container "$CW/bl3.bin" --trace "$CW/07_logs/run_1.log" 2>/dev/null)
+chk "주석·#include 는 누출로 안 셈" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][0]["pass"])')" "True"
 
 # 11e. 0 바이트 initramfs 를 QEMU 에 넘기지 않는가
 ZW=$(new_ws zeroinit); : > "$ZW/fw/initramfs.cpio.gz"; touch "$ZW/fw/Image.patched"
@@ -359,17 +370,17 @@ printf 'x' > "$FW/lk.bin"
 QEMU="$BIN/fake-qemu" bash "$S/run_round.sh" "$FW" mtk-bootloader 1 fastboot "fastboot" "$FW/lk.bin" help fastboot > "$ROOT/obsfb.json" 2>/dev/null
 chk "fastboot 표면 마일스톤 인식" "$(python3 -c "import json;print(json.load(open('$ROOT/obsfb.json'))['milestone'])" 2>/dev/null)" "fastboot"
 
-# 12c. fastboot 표면에서 머신이 입력 명령을 지어내면 항목4 불통과
+# 12c. fastboot 표면에서 머신이 입력 명령을 지어내면 게이트 3 불통과
 VW=$(new_ws mtk_v); printf 'x\x00fastboot: processing commands\x00' > "$VW/lk.bin"
 printf 'fastboot: processing commands\n' > "$VW/07_logs/console_1.txt"
 printf 'const char *c = "getvar:version";\n' > "$VW/06_machine/machine.c"
 printf -- '- 대상: t\n- 이유: r\n- 방법: m\n- 부작용: s\n' > "$VW/06_machine/bypasses.md"
 printf '| shell_func | 0xdeadbeef |\n' > "$VW/STATIC.md"; printf '0xdeadbeef: x\n' > "$VW/07_logs/run_1.log"
-V=$(python3 "$S/verify.py" "$VW" --track 1 --surface fastboot --bl3 "$VW/lk.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
-chk "머신이 입력 명령을 지어내면 불통과" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][3]["pass"])')" "False"
+V=$(python3 "$S/verify.py" "$VW" --target F2 --surface fastboot --container "$VW/lk.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
+chk "머신이 입력 명령을 지어내면 불통과" "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][2]["pass"])')" "False"
 printf 'static void f(void){}\n' > "$VW/06_machine/machine.c"
-V=$(python3 "$S/verify.py" "$VW" --track 1 --surface fastboot --bl3 "$VW/lk.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
-chk "외부 입력이면 항목4 통과"           "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][3]["pass"])')" "True"
+V=$(python3 "$S/verify.py" "$VW" --target F2 --surface fastboot --container "$VW/lk.bin" --trace "$VW/07_logs/run_1.log" 2>/dev/null)
+chk "외부 입력이면 게이트 3 통과"        "$(echo "$V" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][2]["pass"])')" "True"
 
 
 # 12d. 등급이 실제로 사다리를 바꾸는가 (A/B/C)
@@ -442,21 +453,21 @@ cat > "$DW/STATIC.md" <<'EOF'
 |---|---|---|---|---|
 | `entry_vector_refault` | FAR==ELR=0x620 | VBAR 미설정 (capstone 근거) | `fixer-bootflow` | 진입 PC 수정 |
 EOF
-D1=$(python3 "$S/derived_facts.py" "$DW" --track 1)
+D1=$(python3 "$S/derived_facts.py" "$DW")
 chk "도출한 정지점을 읽는다"     "$(echo "$D1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["new"])')" "1"
 chk "담당 fixer 를 뽑아낸다"     "$(echo "$D1" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stop_points"][0]["fixer"])')" "fixer-bootflow"
 
 # 같은 정지점을 또 도출해도 '새 사실' 이 늘면 안 된다 (자기신고 대체의 핵심)
-D2=$(python3 "$S/derived_facts.py" "$DW" --track 1)
+D2=$(python3 "$S/derived_facts.py" "$DW")
 chk "같은 정지점 재도출은 new=0" "$(echo "$D2" | python3 -c 'import json,sys;print(json.load(sys.stdin)["new"])')" "0"
 
 printf '| `smc_unhandled` | 예외2, ELR 이 smc | psci 미구현 (근거) | `fixer-el3` | id 처리 |\n' >> "$DW/STATIC.md"
-D3=$(python3 "$S/derived_facts.py" "$DW" --track 1)
+D3=$(python3 "$S/derived_facts.py" "$DW")
 chk "진짜 새 정지점은 new=1"     "$(echo "$D3" | python3 -c 'import json,sys;print(json.load(sys.stdin)["new"])')" "1"
 
 # 표가 없으면 0 이어야 한다 (없는 걸 지어내지 않음)
 EW2=$(new_ws derived_empty)
-D4=$(python3 "$S/derived_facts.py" "$EW2" --track 1)
+D4=$(python3 "$S/derived_facts.py" "$EW2")
 chk "표가 없으면 new=0"          "$(echo "$D4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["new"])')" "0"
 
 # 측정값이 정지 판정까지 이어지는가
@@ -707,7 +718,7 @@ cat > "$DW17/STATIC.md" <<'EOF'
 
 | `after_false_heading` | 관측 | 근거 | `fixer-el3` | 변경 |
 EOF
-D17=$(python3 "$S/derived_facts.py" "$DW17" --track 1 --peek)
+D17=$(python3 "$S/derived_facts.py" "$DW17" --peek)
 chk "하위 절의 행도 읽는다"       "$(echo "$D17" | python3 -c 'import json,sys;print(json.load(sys.stdin)["total"])')" "3"
 chk "줄바꿈된 #문장이 표를 안 닫음" \
     "$(echo "$D17" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stop_points"][2]["signature"])')" "after_false_heading"
@@ -725,10 +736,10 @@ text = open(p, encoding="utf-8").read()
 filler = "\n".join("근거 문장 %d" % i for i in range(4000))
 open(p, "a", encoding="utf-8").write("\n### round 12 재도출\n" + filler + "\n")
 PY9
-R17=$(python3 "$S/static_rotate.py" "$DW17" --track 1 --keep 1 --max-bytes 20000)
+R17=$(python3 "$S/static_rotate.py" "$DW17" --keep 1 --max-bytes 20000)
 chk "회전 수행"          "$(echo "$R17" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rotated"])')" "True"
 rm -f "$DW17/derived_facts.jsonl"
-D17B=$(python3 "$S/derived_facts.py" "$DW17" --track 1 --peek)
+D17B=$(python3 "$S/derived_facts.py" "$DW17" --peek)
 chk "회전 후에도 행은 전부 남음" \
     "$(echo "$D17B" | python3 -c 'import json,sys;print(json.load(sys.stdin)["total"])')" "3"
 [ -s "$DW17/08_docs/static_archive.md" ] && ok "근거는 08_docs 로 보관" || bad "보관 파일 없음"
@@ -782,6 +793,8 @@ chmod +x "$BIN/fake-qemu-gate"
 HW=$(new_ws harness); printf 'int h;\n' > "$HW/06_machine/machine.c"
 printf 'shell\tS-BOOT # \ncommands\tFollowing commands are supported\n' > "$HW/milestone_tokens.txt"
 printf 'x' > "$HW/bl.bin"
+# 인터럽트 패턴은 도출된 게이트에서만 온다. 계획이 없으면 하니스는 아무것도 보내지 않는다 (아래 별도 시험).
+printf '{"autoboot_interrupt":{"bytes":"\\r","count":3,"contiguous":true,"empty_poll_budget":0,"evidence":"synthetic"}}\n' > "$HW/input_plan.json"
 TIMEOUT=6 QEMU="$BIN/fake-qemu-gate" bash "$S/run_round.sh" "$HW" t 1 shell "shell,commands" "$HW/bl.bin" help shell > "$ROOT/obsh.json" 2>/dev/null
 chk "CR 연타로 게이트 통과 → 셸 도달" \
     "$(python3 -c "import json;print(json.load(open('$ROOT/obsh.json'))['milestone'])" 2>/dev/null)" "commands"
@@ -816,6 +829,17 @@ chk "관측 문서에 입력 경로 사실" \
     "$(python3 -c "import json;d=json.load(open('$HW2/observation.json'));print(d['prompt_seen'],d['input_offered'],d['input_starved'])" 2>/dev/null)" \
     "True True False"
 
+# 도출된 게이트가 없으면 하니스는 인터럽트 패턴을 보내지 않고 출처를 absent 로 남긴다 (기본 CR 3연타 폐기)
+HW3=$(new_ws harness_noplan); printf 'int h;\n' > "$HW3/06_machine/machine.c"
+printf 'shell\tS-BOOT # \n' > "$HW3/milestone_tokens.txt"
+printf 'x' > "$HW3/bl.bin"
+TIMEOUT=4 QEMU="$BIN/fake-qemu-gate" bash "$S/run_round.sh" "$HW3" t 1 shell "shell" "$HW3/bl.bin" help shell > /dev/null 2>&1
+chk "계획이 없으면 보낸 바이트 0, 출처 absent" \
+    "$(python3 -c "import json;d=json.load(open('$HW3/input_summary.json'));print(d['source'],d['bytes_sent'],d['input_offered'])" 2>/dev/null)" \
+    "absent 0 False"
+chk "계획이 없으면 게이트를 못 넘어 셸 미도달" \
+    "$(python3 -c "import json;print(json.load(open('$HW3/observation.json'))['milestone'])" 2>/dev/null)" "none"
+
 # 머신은 입력을 만들지 않는다 — 템플릿 회귀
 grep -q "rx_seed" "$REPO/templates/machine_full.c.tmpl"
 chk "템플릿에 자가 시드 없음"    "$?" "1"
@@ -824,24 +848,24 @@ chk "accept_input 호출 있음"     "$?" "0"
 grep -q "{{RESET_PC}}" "$REPO/templates/machine_full.c.tmpl"
 chk "리셋 PC 가 적재주소와 별개 슬롯" "$?" "0"
 
-# 검증 항목 4 — shell 표면에서도 자가입력을 잡는가
+# 검증 게이트 3 — shell 표면에서도 자가입력을 잡는가
 IW=$(new_ws item4)
 printf 'Following commands are supported\x00' > "$IW/bl3.bin"
 printf 'Following commands are supported\n'   > "$IW/07_logs/console_1.txt"
 printf '| shell_func | 0x9021f3dc |\n' > "$IW/STATIC.md"
 printf '0x9021f3dc: stp\n' > "$IW/07_logs/run_1.log"
 printf 'static void f(void){ qemu_chr_fe_write_all(s->chr,b,1); }\n' > "$IW/06_machine/machine.c"
-V4=$(python3 "$S/verify.py" "$IW" --track 1 --bl3 "$IW/bl3.bin" --trace "$IW/07_logs/run_1.log" --input-token help 2>/dev/null)
-chk "외부 입력이면 항목4 통과" \
-    "$(echo "$V4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][3]["pass"])')" "True"
+V4=$(python3 "$S/verify.py" "$IW" --target F2 --container "$IW/bl3.bin" --trace "$IW/07_logs/run_1.log" --input-token help 2>/dev/null)
+chk "외부 입력이면 게이트 3 통과" \
+    "$(echo "$V4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][2]["pass"])')" "True"
 printf 'static void rx_seed(S*s,const char*p){}\nstatic void f(void){ qemu_chr_fe_write_all(s->chr,b,1); }\n' \
     > "$IW/06_machine/machine.c"
-V4=$(python3 "$S/verify.py" "$IW" --track 1 --bl3 "$IW/bl3.bin" --trace "$IW/07_logs/run_1.log" --input-token help 2>/dev/null)
-chk "머신이 RX 를 채우면 항목4 불통과" \
-    "$(echo "$V4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][3]["pass"])')" "False"
+V4=$(python3 "$S/verify.py" "$IW" --target F2 --container "$IW/bl3.bin" --trace "$IW/07_logs/run_1.log" --input-token help 2>/dev/null)
+chk "머신이 RX 를 채우면 게이트 3 불통과" \
+    "$(echo "$V4" | python3 -c 'import json,sys;print(json.load(sys.stdin)["items"][2]["pass"])')" "False"
 
 # 실행 명령이 하나이고, 그 문서에 범위가 못박혀 있는가
-grep -q "리셋 PC" "$REPO/skills/start/SKILL.md"
+grep -q "reset PC" "$REPO/skills/start/SKILL.md"
 chk "start SKILL 에 실행 범위 명시"  "$?" "0"
 chk "파이프라인을 부르는 스킬은 하나" \
     "$(grep -l 'pipeline.js' "$REPO"/skills/*/SKILL.md | wc -l | tr -d ' ')" "1"
@@ -941,7 +965,7 @@ printf '| 모델 | SM-TEST |\n| 트랙 | 1 |\n' > "$AW/INPUT.md"
   printf '{"epoch":4000,"ts":"T4b","round":4,"fp_origin_esr":"0x2","fp_origin_far":"0xc","fp_origin_elr":"0xd","fp_milestone":"none","fp_bytes":20,"fp_uniq":9,"fp_exc":1,"category":"data_abort_unmapped","fixer":"fixer-memory","change_key":"memory:w4","effect":"applied","tokens_total":5000}\n'
   printf '{"epoch":5400,"ts":"T7","round":1,"fp_origin_esr":"0x3","fp_origin_far":"0xe","fp_origin_elr":"0xf","fp_milestone":"shell","fp_bytes":900,"fp_uniq":80,"fp_exc":1,"category":"reached","effect":"progress","tokens_total":10000}\n'
 } > "$AW/rounds.jsonl"
-A=$(python3 "$S/analyze_run.py" "$AW" --track 1 2>/dev/null)
+A=$(python3 "$S/analyze_run.py" "$AW" 2>/dev/null)
 chk "분석 생성 성공"            "$?" "0"
 chk "회차 수를 셈"              "$(echo "$A" | python3 -c 'import json,sys;print(json.load(sys.stdin)["rounds"])')" "5"
 chk "회차 번호 되감김을 구간으로" "$(echo "$A" | python3 -c 'import json,sys;print(json.load(sys.stdin)["series"])')" "2"
@@ -963,7 +987,7 @@ grep -q "관측을 움직이지 못한 변경" "$AW/ANALYSIS.md"
 chk "무효 변경을 짚음"          "$?" "0"
 # 기록이 아예 없어도 죽지 않아야 한다 (내보내기 중간에 멈추면 안 됨)
 EW=$(new_ws analysis_empty)
-python3 "$S/analyze_run.py" "$EW" --track 1 >/dev/null 2>&1
+python3 "$S/analyze_run.py" "$EW" >/dev/null 2>&1
 chk "기록이 없어도 생성"        "$?" "0"
 
 
@@ -1315,6 +1339,13 @@ RC=$(MIN_FREE_MB=999999999 QEMU="$BIN/fake-qemu" bash "$S/run_full.sh" \
        "$DW" m "$DW/bl.bin" help 1 shell >/dev/null 2>&1; echo $?)
 chk "디스크 부족이면 시작 안 함"  "$RC" "3"
 
+
+# =============================================================================
+# 영역별 추가 시험 (tests/parts/*.sh) - 각 파일은 단독 실행도 된다
+for _part in "$REPO"/tests/parts/[a-z]*.sh; do
+  [ -f "$_part" ] || continue
+  . "$_part"
+done
 
 printf '\n\033[1m════════ 결과: %d 통과 / %d 실패 ════════\033[0m\n' "$PASS" "$FAIL"
 echo "작업 폴더: $ROOT"
