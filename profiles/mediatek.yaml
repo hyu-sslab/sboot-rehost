@@ -1,66 +1,143 @@
 # profiles/mediatek.yaml - MediaTek chain hints.
 #
-# No values (addresses, offsets) live here; they are derived from the target
-# firmware (honesty rule 1). These only say WHERE to look.
+# No values (addresses, offsets, register values) live here; they are derived
+# from the target firmware (honesty rule 1). These only say WHERE to look and
+# what SHAPE to expect. Everything below was observed on ONE device: a line that
+# is a family-wide hope rather than a measurement says so.
 #
-# ★ The MediaTek bootloader chain is AArch32. The arm64 entry-stub signature
-#   finds nothing there, and "no stages found" would be a false observation.
-#   stage_map.py exits 3 for arm32 and the caller stops with BLOCKED_ARCH.
-#   Until an AArch32 signature and machine template exist, this profile
-#   documents the target rather than enabling a run.
+# ★ A MediaTek boot is not one bootloader image. It is five stage KINDS that
+#   come from different places and run in different architectures: the first
+#   stage is a container the machine loads, the stages after it are read from the
+#   boot medium by the stage before them, and the kernel is entered by the
+#   bootloader's own jump. The architecture of each stage is DERIVED per stage
+#   (stage_map.json `arch`) - never taken from this file, never assumed uniform.
+#
+# The family kit. scripts/family_kit.py reads these two keys with a regular
+# expression, so they stay flat, one line each, flush left. The pipeline hands
+# the listed files to every agent it delegates to.
 
 name: mediatek
-description: search hints for the MediaTek family (Preloader + LK bootloader)
+description: search hints for the MediaTek family (preloader, EL3 monitor, secure OS, LK bootloader, kernel)
 extends: generic
+
+knowledge: [knowledge/faults_mediatek.md]
+runbook: knowledge/runbook_mediatek.md
 
 chain:
   container_format: vendor_header
   container_magic: "0x58881688"      # MTK image header; payload usually at 0x200
   container_notes:
-    - the chain is Preloader -> LK, so expect TWO executable stages, not three
-    - preloader and lk ship as separate images (preloader_*.bin, lk.bin /
-      lk-verified.img) rather than as one multi-stage container
+    - the first stage ships as its own container image (preloader_*.bin or
+      preloader.img). The bootloader and the later stages ship as separate
+      partition images, not inside it
     - the MTK header precedes the payload; entering at file offset 0 executes
       header bytes
+    - a second header (GFH) can sit INSIDE the payload, at a distance from its start
+      that is found by scanning for its FILE_INFO block, not assumed. Missing it once
+      shifted a derived load base. Parse the header and record the parse evidence
+    - the header form is not settled across firmware. Names seen are the MTK magic
+      above, an EMMC_BOOT marker and BRLYT. Decide by parsing and write the verdict
+      with its evidence to STATIC.md - "unconfirmed" is an acceptable answer
+    - high entropy is not proof of encryption - the boot and recovery kernels are
+      usually gzip. Check compression before calling a region encrypted
+    - enumerate the AP and BL archive members BEFORE writing "absent" for any
+      component (see package below)
+
+  # One entry per stage KIND, in boot order. How many stages a firmware really
+  # has, what they are called and which architecture each runs in are derived
+  # (stage_map.json). origin follows stage_map.json v2: container | medium | handoff.
+  stage_kinds:
+    - kind: first_stage
+      origin: container
+      note: "loaded by the machine from the container; the boot ROM before it is skipped"
+    - kind: el3_monitor
+      origin: medium
+      note: "started by the first stage - on the device studied it writes the monitor's entry point to a register and requests a warm reset. The entry point is derived from that write"
+    - kind: secure_os
+      origin: medium
+      note: "loaded by the first stage. Its entry state is not established (unconfirmed). The secure world is out of scope to execute (BLOCKED_TEE); record its load, do not run it"
+    - kind: bootloader
+      origin: medium
+      note: "a Little Kernel (LK) derivative. Reached after the first stage's own jump line, through the monitor path"
+    - kind: kernel
+      origin: handoff
+      note: "entered by the bootloader's own jump (on the device studied an SMC whose argument carries the entry point - never observed at run time). There is no -kernel handoff"
 
   entry_stub:
+    arm64: >
+      As generic: short branch, `adr` for the vector table, `mrs xN, currentel`,
+      then `msr vbar_el*`. It applies to the EL3 monitor and to the kernel image.
     arm32: >
-      NOT DEFINED. AArch32 has no CurrentEL and no VBAR_EL3, so the arm64
-      signature does not apply. Candidate shapes to characterise before writing
-      one: the reset vector table at image start, CP15 writes (`mcr p15, 0,
-      rX, c12, c0, 0` sets VBAR), and the switch out of secure monitor mode.
-      Until this is written, stage discovery is not available for this family.
+      A search shape, not a verdict. The entry of an AArch32 stage is a reset
+      VECTOR TABLE (a run of ARM-mode branch words at the stage start) or the
+      crt0 right after it. Marks to look for: a literal-pool indirect jump past
+      the vectors (`ldr pc, [pc, #-4]`) that steps over the stage's own
+      initialisation; CP15 writes (`mcr p15, 0, rX, c12, c0, 0` sets VBAR); the
+      exit from secure monitor mode. AArch32 code mixes ARM (vectors, crt0) and
+      Thumb-2 (the C code): decode each range in the right mode before scoring
+      it. Stage discovery is available - stage_map.py derives AArch32 entries and
+      records arch and entry_pc per stage. An entry supported by one anchor only
+      stays `unconfirmed`.
 
   handoff_surface: >
     Derive it the same way as elsewhere - absolute loads the entry code performs
-    before it writes anything - but expect the boot ROM interface to differ from
-    the SRAM function-pointer table Exynos uses. Do not carry that assumption
-    across families.
+    before it writes anything - but expect a different shape from the Exynos SRAM
+    function-pointer table; do not carry that assumption across families. Three
+    kinds of handoff appear in this family and each is derived on its own: (1) a
+    register write plus a warm-reset request that starts an AArch64 stage, (2)
+    argument buffers the first stage leaves in DRAM, announced by the
+    reserved-memory table the bootloader prints, (3) the argument registers of the
+    final jump into the kernel.
 
   skip_policy: >
     Same rule: a stage may be skipped only if the stages after it read no memory
-    it wrote. Which MediaTek stages are encrypted is a per-device observation,
-    not a family constant - measure the entropy, do not assume.
+    it wrote. Which MediaTek stages are encrypted is a per-device observation, not
+    a family constant - measure the entropy, then check compression, do not
+    assume. A stage that is absent from the package is a different case from one
+    that is encrypted: enumerate the package members first.
 
 stage_hints:
   first_stage: ["preloader", "pl ", "brom", "download agent", "da "]
   dram_init: ["emi", "dramc", "dram", "calibration", "lpddr", "training"]
   bootloader: ["little kernel", "lk build", "fastboot", "boot mode", "printenv"]
-  secure_os: ["trusty", "tee", "atf"]
-  el3_monitor: ["runtime service", "smc", "psci"]
+  secure_os: ["trusty", "tee", "teegris"]
+  el3_monitor: ["runtime service", "smc", "psci", "bl31", "atf"]
   crypto: ["sha256", "rsa", "aes"]
   power_fw: ["spm", "sspm", "mcupm", "scp"]
 
+# AP and BL archive members. List them ALL in STATIC.md with a used / unused mark
+# before saying a component is absent. On the device studied "not in the package"
+# was concluded wrongly three times (sspm, spmfw, super). Names are as they
+# appear in that device's archives; a role is given only where it is established.
+package:
+  components:
+    preloader: first stage
+    lk: bootloader
+    tee: secure OS payload
+    sspm: coprocessor firmware
+    scp: coprocessor firmware
+    mcupm: coprocessor firmware
+    spmfw: power management firmware
+  role_not_established: [dpm, param, up_param, efuse, tzar, gz, pi_img]
+  also_check:
+    - boot, recovery, dtbo and vbmeta partition images
+    - super (an Android sparse image, not a GPT disk)
+
 surface:
+  # A surface MAY BE NONE. The LK of this family often prints its log on the UART
+  # and offers no input path, yet still boots on to the kernel. The surface rung
+  # is then dropped from the ladder and the boot continues by itself (autoboot);
+  # that is an outcome, not a block. Stop only when a run is observed waiting for
+  # input that has no path.
   implementation: LK                 # Little Kernel derivative
-  arch: arm32                        # AArch32 ARM/Thumb-2, NOT AArch64
+  arch: derived                      # per stage, see stage_map.json (the LK on the device studied is AArch32)
   image_names: ["lk.bin", "lk-verified.img", "preloader_*"]
-  candidates: ["fastboot", "shell"]
+  candidates: ["fastboot", "shell", "none"]
   known_strings: ["Little Kernel", "lk build", "fastboot", "preloader",
                   "boot mode", "printenv"]
   cmd_entry:
     size_hint: 16                    # {name, help, func, mask} - Exynos uses 32
-    pointer_width: 4                 # AArch32: 4-byte pointers, not 8
+    pointer_width: 4                 # when the image is AArch32: 4-byte pointers
   fastboot_strings: ["fastboot: processing commands", "fastboot_init(",
                      "command buf", "getvar:"]
   notes:
@@ -77,23 +154,74 @@ verified_boot:
   notes:
     - confirm whether verification runs in LK or is delegated to a TEE payload;
       only the former can be observed in this environment
+    - the generic assumption "the hash is software, so TCG runs it unpatched" can
+      be FALSE here - the hash may be computed by a hardware engine behind the
+      monitor, reached by SMC. Find out which before deciding anything
+    - when it is a hardware engine the order is (a) model the engine so the
+      digests are really computed, (b) a labelled comparison bypass, (c) stop.
+      A bypassed verify_ok is `reached_bypassed`, never plain `reached`
+    - a stubbed comparison always answers "equal", so a corrupted vbmeta still
+      passes. That the negative test does NOT fail is itself the evidence
 
 boot_medium:
-  hci_kind: ufs                      # some devices are eMMC; confirm from the DTB
+  hci_kind: unknown                  # emmc | ufs - DECIDE with the rule below
+  decide_from:
+    - 1. the bootloader's own medium-init line on the UART (it names the type it
+         initialised). This is the primary evidence
+    - 2. the DTB msdc node (its bus-width) and the partition table the bootloader
+         reads
+    - 3. a DTB ufshci node is NOT evidence on its own - it is a SoC-shared node
+         and the host may never be created. Building a UFS model from it first
+         left the stop point unchanged and had to be undone
   notes:
-    - UFS is usually built into the kernel (=y), so no vendor .ko exists by
-      design - the driver is built in, which is not a blocker
-    - super.img on these devices is an Android sparse super, not a GPT disk;
-      a LUN with a synthesised GPT is required for partition enumeration
-    - the HCI interrupt must be level-triggered, not a pulse
+    - when it is eMMC, the controller walls are the eMMC section of
+      knowledge/faults_storage.md; the bootloader's SD probe commands must time
+      out, the kernel driver needs 36-bit DMA addresses
+    - when it is UFS, the driver is usually built into the kernel (=y), so no vendor .ko exists by
+      design, which is not a blocker. The HCI interrupt
+      must be level-triggered, not a pulse
+    - super.img on these devices is an Android sparse super, not a GPT disk; a
+      medium with a synthesised GPT is required for partition enumeration
+    - vendor structures on the medium (a partition information table, a boot
+      parameter block, a chain of signed partitions) are VENDOR extensions, not
+      MediaTek-general. Derive each one per firmware from the bootloader log and
+      its disassembly; record the vendor in lu_manifest.json
+    - the bootloader looks partitions up by name - take the names from its log and
+      strings. Partitions it only checks for existence can be zero-filled, and the
+      manifest says so (kind)
+
+observation:
+  # The kernel of this family may print NOTHING on the UART while it runs. Its log
+  # then exists only in a RAM-backed log buffer, which the host reads from outside
+  # (memory dump channel). Silence on the UART is not a stop point.
+  channels: [uart, memdump]
+  memdump:
+    where_to_look:
+      - the reserved-memory table the bootloader prints, in the entry whose name
+        says pstore, ram_console or ramoops
+      - the kernel command line the bootloader passes (ramoops.mem_address,
+        ramoops.mem_size, ramoops.console_size)
+      - a DTB reserved-memory ramoops node (not yet confirmed on any firmware; no tool
+        derives it from the DTB, so a region read there is written by hand with the node
+        path as evidence)
+    notes:
+      - write the derived region to memdump_plan.json and the evidence to STATIC.md;
+        without that file the channel is off and nothing else changes
+      - the log buffer is a ring and can wrap before the first dump is taken, so a
+        banner seen is evidence but a banner not seen is not proof it never ran
+      - the buffer only starts to fill some seconds into the kernel's boot
+      - the machine must never write to this region (checked statically)
 
 kernel:
   uart_earlycon: mtk                 # 16550-compatible, reg-shift 2
   driver_names: ["ufs_mtk", "ufshcd", "mtk-uart"]
   notes:
     - confirm the earlycon family from the DTB serial node compatible
-    - vendor coprocessors (SCP / SSPM / MCUPM / ADSP) and the modem (CCCI) have
-      no firmware here; their IPIs time out and must fail gracefully
+    - vendor coprocessors (SCP / SSPM / MCUPM / ADSP) and the modem (CCCI) may or
+      may not ship in the package - inventory it first. Whatever cannot run here
+      times out its IPIs and has to fail gracefully
+    - the kernel can run with the UART silent; look at the memory dump channel
+      before calling a quiet kernel dead
     - '-icount is often required: timer interrupt overload can look like a hang'
     - 'initcall_debug on the cmdline pinpoints a stalled initcall'
   cpu_topology_hint:
@@ -103,3 +231,10 @@ kernel:
       core per cluster. QEMU's default 4-per-cluster then produces MPIDRs the
       DTB never names, psci cpu_on returns -22 and cpuhp holds cpu_hotplug_lock
       until init blocks forever. See the knowledge table's cpu_cluster_mpidr row.
+  cpu_creation_order_hint:
+    note: >
+      A mixed-architecture chain has more than one CPU. The EL3 monitor
+      initialises only the interrupt controller frame of the CPU with affinity 0,
+      and QEMU numbers the controller's CPU interfaces by creation order, so the
+      CPU that runs the monitor must be created first or the kernel gets no tick.
+      A build-layer premise (gic_redistributor_order in faults_mediatek.md).

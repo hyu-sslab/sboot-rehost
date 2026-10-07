@@ -8,10 +8,22 @@ later round, so on a long run it grows past 300 KB and each round costs more tha
 the one before. On the S921N run rounds went from six minutes to twenty while the
 firmware stood still.
 
-Rotation moves the OLD evidence prose out to an archive and keeps the thing the
-loop actually reads: the stop-point table. Rows written inside the subsections
-being archived are promoted into the main table first, so nothing derived is
-lost - archiving without promoting would silently delete facts.
+Rotation moves the OLD evidence prose out to an archive and keeps the things the
+loop and the verification actually read. Nothing derived is lost - archiving
+without carrying would silently delete facts:
+
+  stop-point rows       promoted into the main table (derived_facts.py reads them)
+  hash_engine rows      moved as they are, table form or one-line form (verify_gates.py
+                        reads them: hash_engine_state)
+  address-window tables moved as whole tables under a label line (verify_gates.py reads
+                        them: address_windows_report)
+
+The last two are not stop points (no owner column), so a rotation that only promoted
+stop-point rows turned a `hardware` hash_engine state into `absent` and made the next
+labelled hash bypass fail check_change.sh. They are found with verify_gates.py's own
+parsers, so what rotation carries and what verification reads cannot drift apart, and
+they keep their file order (the last hash_engine row wins there). Code-fenced examples
+are not facts for either parser and stay in the archive.
 
 Usage:
   static_rotate.py <workdir> [--max-bytes N] [--keep N]
@@ -26,6 +38,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from derived_facts import FENCE, HEADING, OWNER, ROW, SECTION  # noqa: E402
+import verify_gates as vg  # noqa: E402
 
 ARCHIVE_NAME = "static_archive.md"
 
@@ -86,11 +99,87 @@ def is_row(line):
     return match.group(1)
 
 
+HEADER_NAMES = ("시그니처", "signature", "name")
+# A short line (80 characters at most) that names the table: verify_gates.py reads a table under
+# such a line as an address-window table even when its header lacks the template's columns.
+WINDOWS_LABEL = "주소 창 표 (address windows) - 옛 하위 절에서 옮김"
+
+
+def is_table_line(line):
+    return line.strip().startswith("|")
+
+
+def table_run_end(lines, first, stop):
+    """Index of the last line of the run of table lines that starts at `first`."""
+    last = first
+    while last + 1 < stop and is_table_line(lines[last + 1]):
+        last += 1
+    return last
+
+
+def stop_table_end(lines, start, stop):
+    """Last line of the stop-point table in lines[start+1:stop], or None.
+
+    The stop-point table is the first run of table lines that holds its header
+    (시그니처 / signature / name) or a row with an owner cell. Taking the LAST table line
+    instead would land inside a carried address-window table after the first rotation and push
+    the main table apart on the second."""
+    fenced = False
+    i = start + 1
+    while i < stop:
+        if FENCE.match(lines[i]):
+            fenced = not fenced
+            i += 1
+            continue
+        if fenced or not is_table_line(lines[i]):
+            i += 1
+            continue
+        last = table_run_end(lines, i, stop)
+        for k in range(i, last + 1):
+            head = ROW.match(lines[k].strip())
+            if is_row(lines[k]) or (head and head.group(1).lower() in HEADER_NAMES):
+                return last
+        i = last + 1
+    return None
+
+
+def carried_facts(lines, lo, hi):
+    """What verify_gates.py reads from lines[lo:hi] and that is not a stop-point row.
+
+    Returns (blocks, counts) or None when the lines cannot be mapped one to one onto what the
+    parsers saw (then the caller does not rotate). `blocks` are lists of raw lines in file order:
+    each hash_engine row on its own, each address-window table under a label line. `counts` is
+    {"hash_engine": n, "address_windows": m}."""
+    chunk = lines[lo:hi]
+    text = "".join(chunk)
+    if len(text.splitlines()) != len(chunk):
+        return None
+    found, spans = [], []
+    for table in vg.address_window_tables(text):
+        first = table["line"] - 1
+        last = first + 1                      # the header, then its separator, then the rows
+        while last + 1 < len(chunk) and is_table_line(chunk[last + 1]):
+            last += 1
+        spans.append((first, last))
+        found.append((first, "address_windows", [WINDOWS_LABEL + "\n"] + chunk[first:last + 1]))
+    for row in vg.parse_hash_engine_rows(text):
+        at = row["line"] - 1
+        # A hash_engine row written directly under a window table is a line of that table
+        # (the parsers cannot tell them apart): the table already carries it, once.
+        if not any(first <= at <= last for first, last in spans):
+            found.append((at, "hash_engine", [chunk[at]]))
+    found.sort(key=lambda item: item[0])
+    blocks, counts = [], {"hash_engine": 0, "address_windows": 0}
+    for _, kind, block in found:
+        counts[kind] += 1
+        block = [ln if ln.endswith("\n") else ln + "\n" for ln in block]
+        blocks.append(block)
+    return blocks, counts
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir")
-    # Accepted and ignored: there is one record per firmware now.
-    parser.add_argument("--track", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--max-bytes", type=int, default=120000,
                         help="rotate only once the record is larger than this")
     parser.add_argument("--keep", type=int, default=3,
@@ -140,12 +229,25 @@ def main():
             if signature:
                 promoted[signature] = lines[i] if lines[i].endswith("\n") else lines[i] + "\n"
 
-    # The main table is the last run of table lines before the first subsection.
+    # The facts verification reads from the same subsections (hash_engine rows, address-window
+    # tables): they travel with the promoted rows, or the archive would take them along.
+    older_lo, older_hi = older[0][0], older[-1][1]
+    carried = carried_facts(lines, older_lo, older_hi)
+    if carried is None:
+        result["reason"] = "하위 절의 줄을 파서의 줄과 맞추지 못해 회전하지 않았습니다 (안전 정지)"
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    carried_blocks, carried_counts = carried
+
+    # The main table is the first run of table lines that holds the stop-point header or an owner
+    # row (see stop_table_end); a record without such a run keeps the old reading: the last table
+    # line before the first subsection.
     preamble_end = older[0][0]
-    table_last = None
-    for i in range(start + 1, preamble_end):
-        if lines[i].strip().startswith("|"):
-            table_last = i
+    table_last = stop_table_end(lines, start, preamble_end)
+    if table_last is None:
+        for i in range(start + 1, preamble_end):
+            if is_table_line(lines[i]):
+                table_last = i
     if table_last is None:
         result["reason"] = "본문 표를 찾지 못해 회전하지 않았습니다 (안전 정지)"
         print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -172,13 +274,20 @@ def main():
 
     pointer = (f"\n> 오래된 재도출 근거 {len(older)}건은 "
                f"`08_docs/{ARCHIVE_NAME}` 로 옮겼습니다. "
-               f"표의 행은 모두 위 본문 표에 남아 있습니다.\n\n")
+               f"표의 행은 모두 위 본문 표에 남아 있습니다.")
+    if carried_blocks:
+        pointer += (" 검증이 읽는 hash_engine 행과 주소 창 표는 정지점 행이 아니라서 "
+                    "아래에 그대로 옮겼습니다.")
+    pointer += "\n\n"
 
     out = []
     out.extend(lines[:table_last + 1])
     out.extend(promoted.values())
     out.extend(lines[table_last + 1:older[0][0]])
     out.append(pointer)
+    for block in carried_blocks:            # file order; one blank line keeps tables apart
+        out.extend(block)
+        out.append("\n")
     out.extend(lines[older[-1][1]:])
 
     with open(path, "w", encoding="utf-8") as fh:
@@ -187,6 +296,7 @@ def main():
     result.update({
         "rotated": True,
         "promoted": len(promoted),
+        "carried": carried_counts,
         "archived": len(older),
         "archive": archive_path,
         "bytes_after": os.path.getsize(path),

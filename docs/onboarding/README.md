@@ -10,13 +10,7 @@
 
 ## 빠른 시작
 
-```
-/sboot-rehost:init                  설치 후 1회. 옛 캐시 삭제 + QEMU 빌드
-_inbox/ 에 펌웨어 배치
-/sboot-rehost:start [F1|F2|F3]      인식부터 검증까지 자율 진행
-/sboot-rehost:status                진행 확인
-/sboot-rehost:export                재현 키트
-```
+설치와 명령은 [README](../../README.md) 의 「설치와 사용」에 있다.
 
 ## 요약
 

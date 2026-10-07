@@ -13,6 +13,12 @@
 name: generic
 description: default search hints for an unknown or unprofiled target
 
+# The family kit: scripts/family_kit.py reads these two flat keys, one line each,
+# flush left. A family adds its own knowledge tables and runbook here; the common
+# tables are added by the pipeline. Empty means "nothing beyond the common ones".
+knowledge: []
+runbook: ""
+
 chain:
   # How many stages a container holds, what they are called and where they load
   # are all DERIVED - scripts/stage_map.py does it. These keys only say what
@@ -31,9 +37,14 @@ chain:
       `mrs xN, currentel`, then `msr vbar_el{1,2,3}` on the branch for that
       level. A bare `mrs currentel; ret` is a getter, NOT a stage boundary.
     arm32: >
-      NOT DEFINED. AArch32 has no CurrentEL, so the arm64 signature finds
-      nothing and "no stages" would be a false observation. stage_map.py exits 3
-      and the caller must stop with BLOCKED_ARCH.
+      AArch32 has no CurrentEL, so the arm64 signature finds nothing; stage_map.py
+      derives an AArch32 entry from what the image itself says instead: the entry a
+      container header (a GFH block) declares, an ARM-mode vector table at the payload
+      start, or the start-up code. A base is accepted only when two independent
+      anchors land on one value; otherwise the stage is `unconfirmed` and not
+      runnable. Exit code 3 means no entry signature was found at all - the caller
+      stops with BLOCKED_ARCH and says it is a gap in the tool, not a fact about
+      the firmware.
 
   handoff_surface: >
     What the previous stage leaves behind. Derive it, do not assume: look for
@@ -52,10 +63,10 @@ chain:
 # Keyword sets used by scripts/stage_map.py to name a region from what it says
 # about itself. One line per stage kind, flow-style list.
 stage_hints:
-  first_stage: ["loading", "rx done", "header fail", "preloader", "bl1", "epbl"]
+  first_stage: ["loading", "rx done", "header fail", "preloader", "bl1"]
   dram_init: ["dmc", "dram", "mif", "lpddr", "ddr", "training", "leveling"]
   bootloader: ["autoboot", "following commands", "fastboot", "boot linux", "board_"]
-  secure_os: ["teegris", "sec_os", "trusty", "tzsw", "secure os"]
+  secure_os: ["sec_os", "trusty", "tzsw", "secure os"]
   el3_monitor: ["runtime service", "smc_handler", "esr_el1", "synchronous exception"]
   crypto: ["cryptomanager", "crypto_operation", "rpmb", "aes", "sha256"]
   power_fw: ["enter_wfi", "nvic", "acpm", "dvfs", "hotplug"]
@@ -64,7 +75,7 @@ surface:
   # The interactive surface is DERIVED before any goal is set. A command table
   # that no dispatcher walks is an island, not a surface.
   candidates: ["shell", "fastboot"]
-  prompt_candidates: ["S-BOOT # ", "# ", "> "]
+  prompt_candidates: ["# ", "> "]
   notes:
     - check the UART driver for a receive path (RBR read / rx polling) before
       assuming a shell exists
@@ -72,7 +83,7 @@ surface:
 
 verified_boot:
   # Where the bootloader's own verification lives, and what it verifies against.
-  keywords: [avb, vbmeta, libavb, hashtree, rollback, keystorage, "public key"]
+  keywords: [avb, vbmeta, libavb, hashtree, rollback, "public key"]
   notes:
     - if the hash/RSA implementation is software inside the bootloader, TCG runs
       it as-is and no crypto accelerator model is needed
@@ -101,8 +112,8 @@ kernel:
   arch_timer_intid: { secure_phys: 29, nonsecure_phys: 30, virt: 27, hyp: 26 }
   gate_keywords: [fips, crypto, defex, selinux, avb, vbmeta, complete_formation]
   notes:
-    - a boot image with ramdisk_size=0 is system-as-root: there is no initramfs
-      and userspace does not exist until the storage model works
-    - the DTB is authoritative for MMIO bases. Do NOT scan for 4-byte literals:
+    - "a boot image with ramdisk_size=0 is system-as-root: there is no initramfs
+      and userspace does not exist until the storage model works"
+    - "the DTB is authoritative for MMIO bases. Do NOT scan for 4-byte literals:
       AArch64 builds constants with MOVZ/MOVK, so a literal scan finds
-      coincidental byte sequences and misses the real base
+      coincidental byte sequences and misses the real base"

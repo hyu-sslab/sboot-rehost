@@ -9,23 +9,11 @@ Assigned faults: `smc_undef`, `psci_suspend`, `hvc_pkvm`, `fpu_trap`.
 
 These appear on both tracks, but the repair is the same, so one fixer owns them.
 
-## Rules shared by every fixer (violations are rolled back at the gate)
+The rules every fixer shares (family knowledge and runbook, bypass record, no stubs or adaptive toggles, open
+questions, output language) arrive with the pipeline prompt as `FIXER_RULES` (`workflows/pipeline.js`); this file
+keeps only what is specific to EL3 and exception-level faults.
 
-1. **One place per round.** `scripts/check_change.sh` counts the diff and blocks it.
-2. **No speculative stubs, no adaptive toggles** (honesty rule 1). Constants only.
-3. **Record every change as a bypass** in `06_machine/bypasses.md` with
-   `대상 / 이유 / 방법 / 부작용`.
-4. **Never repeat a change** - check `change_key` in `rounds.jsonl`.
-5. **If you do not know where a value comes from, escalate instead of fixing.**
-6. **When stalling, read the 부작용 column of earlier bypasses first.**
-7. **Decline what is not yours** (`not_mine: true`).
-8. **When you have no untried change left, say so** (`no_new_change: true`) -
-   it feeds the stop condition, so do not inflate it.
-
-## Output language
-
-`bypasses.md` and `one_line_progress` are user-facing: **write them in natural
-Korean**, keeping addresses and encodings verbatim.
+Your unit of change is **one place per round**.
 
 ## Confirm the instruction before patching
 
@@ -36,7 +24,7 @@ python3 scripts/carve_disasm.py disasm <bin> <file_off> 0x20 <base_va>
 ```
 
 - Is it really `smc #0`? If not, it may be a different undefined instruction -
-  decline or escalate.
+  decline (`not_mine`), or answer `no_new_change=true` with the question in `rationale`.
 - Is it really an FP/SVE instruction (`ldr q`, `str q`, `ld1`)?
 
 **Never drop in a NOP without confirming.** Erasing the wrong instruction
@@ -67,29 +55,21 @@ match the expected pre-image**.
 
 ## Output (JSON)
 
+Shape only (example of the shape from one device - the values are not yours, derive them
+from your target). The bypass entry itself goes in `bypasses.md`, not in this JSON. The declining flags
+(`not_mine`, `no_new_change`) and the null `encoding` / `pre_image` of a change that patches no bytes are
+left out: the pipeline prompt says when to set them.
+
 ```json
 {
   "fixer": "fixer-el3",
-  "not_mine": false,
-  "no_new_change": false,
-  "category": "smc_undef",
   "change": {
     "type": "machine_c_edit",
     "target": "smc_handler 의 PSCI 분기",
-    "description": "CPU_ON(0xc4000003) 을 arm_handle_psci_call 로 위임",
-    "encoding": null,
-    "pre_image": null
+    "description": "CPU_ON(0xc4000003) 을 arm_handle_psci_call 로 위임"
   },
   "change_key": "el3:smc_fnid:0xc4000003",
   "rationale": "ELR 을 디스어셈블한 결과 smc #0 이고 x0=0xc4000003 즉 PSCI CPU_ON 입니다. EL3 모니터가 없으므로 PSCI 제공자를 모델해야 합니다",
-  "bypass_doc": {
-    "대상": "SMC 0xc4000003 (PSCI CPU_ON)",
-    "이유": "실제 EL3 모니터(TF-A)가 없어 커널의 PSCI 호출이 미정의 예외로 떨어집니다",
-    "방법": "machine 의 smc_handler 에서 arm_handle_psci_call 로 위임하고 psci_conduit=SMC 로 둡니다",
-    "부작용": "TF-A 고유의 보안 서비스 동작은 재현되지 않습니다. eFuse·TEE 호출은 별도로 미달입니다"
-  },
-  "one_line_progress": "| kboot 12 | smc undef ELR=0xffff8000081c034 | PSCI CPU_ON shim 처리 |",
-  "suspect_prior_bypass": { "bypass_id": null, "why": null },
-  "escalate": { "needed": false, "question": null }
+  "one_line_progress": "| run 12 | smc undef ELR=0xffff8000081c034 | PSCI CPU_ON shim 처리 |"
 }
 ```

@@ -30,8 +30,11 @@ derived (honesty rule 1, never borrow). What lives here is **the procedure**.
 
 Apply with:
 ```bash
-python3 scripts/patch_kernel.py <workdir>/fw/Image <workdir>/fw/Image.patched
+python3 scripts/patch_kernel.py <workdir>/fw/Image <workdir>/fw/Image.patched \
+  <workdir>/kernel_patch_sites.json
 ```
+The sites file is a JSON list of `{"off", "expected", "new", "why"}` (hex strings); no file
+means nothing to patch.
 `patch_kernel.py` refuses to apply on a pre-image mismatch.
 
 ## Bypass record (mandatory for every gate patch)

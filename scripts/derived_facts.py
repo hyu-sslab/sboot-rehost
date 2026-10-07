@@ -121,8 +121,6 @@ def read_seen(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("workdir")
-    # Accepted and ignored: there is one record per firmware now.
-    parser.add_argument("--track", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--peek", action="store_true",
                         help="report without recording")
     args = parser.parse_args()

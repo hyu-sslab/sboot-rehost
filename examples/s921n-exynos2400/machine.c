@@ -3,7 +3,8 @@
  *
  * Full BL3 (sboot_bl3.bin, 8 MB) at 0x90000000 + command table relocation.
  * Goal: real "help" command output (not forced/injected) by applying the
- * relocation discovered in 09_another_people_analyze/.../sm_s921b.c.
+ * relocation taken from a reference implementation by another analyst
+ * (not in this repository).
  *
  * Key facts:
  *  - BL3 linker addr: 0xF467D000
@@ -175,8 +176,9 @@ static void v2_load_bl3(SbootV2State *s, MachineState *ms) {
     memcpy(ram + off, buf, sz);
     g_free(buf);
 
-    /* Boot magic from BL2 handoff (sm_s921b.c). Without these, BL3 enters
-     * the full re-init path that requires PMIC/UFS/clocks. */
+    /* Boot magic from BL2 handoff (reference implementation of another
+     * analyst). Without these, BL3 enters the full re-init path that
+     * requires PMIC/UFS/clocks. */
     wr32(ram, DRAM_BASE, 0x80000000ULL, 0x66265999);
     wr32(ram, DRAM_BASE, 0x80000010ULL, 0x77275999);
 
@@ -198,8 +200,9 @@ static inline uint64_t rd64(uint8_t *ram, hwaddr base, uint64_t va) {
 
 static void v2_apply_patches(uint8_t *ram, hwaddr base) {
     /* ============================================================
-     *  Patches transcribed from 09_another_people_analyze sm_s921b.c
-     *  with attribution. All addresses are RUNTIME addresses (post-load).
+     *  Patches transcribed from a reference implementation by another analyst
+     *  (not in this repository), with attribution.
+     *  All addresses are RUNTIME addresses (post-load).
      * ============================================================ */
 
     /* Heap allocator at 0x901DA234 — bump allocator using 0x90900000+ */

@@ -18,11 +18,23 @@ are not sure, answer `unknown` - it costs you nothing.
 |---|---|
 | fingerprint | `<workdir>/fingerprint.json` - raw observation, do not alter |
 | console | `07_logs/console_N.txt` |
-| summary | `07_logs/run_N.summary.txt` or `kboot_N.summary.txt` - key stop points |
+| summary | `07_logs/run_N.summary.txt` - key stop points |
 | full trace | only when needed: WSL `~/rehost/_traces/…` (the `trace=` path) |
 | derived facts | `STATIC.md` · `stage_map.json` |
 | history | `<workdir>/rounds.jsonl` - is this classification repeating? |
-| knowledge | `knowledge/faults_unified.md` (분류표), `faults_storage.md` · `kernel_gates.md` (심화) |
+| knowledge | `knowledge/faults_unified.md` (분류표), `faults_storage.md` · `kernel_gates.md` (심화), and **the family tables on the prompt's `Family knowledge:` line** (the profile's `knowledge:` key - for MediaTek `faults_mediatek.md`). Match against all of them |
+| family runbook | the prompt's `Runbook:` line (an absolute path) - which step of the family's guide the run is in. It orders the work; the tables name the stop point |
+| registry | `fixers/registry.yaml` - fault name to owning fixer |
+| host lines | `07_logs/host_N.txt` (QEMU's own diagnostics, each line may carry a wall-clock epoch). The file is written whenever the round produced host lines, with or without a memory-dump plan; `observation.json` `host_log` names it (`null` when there were none). **The machine speaking, never guest evidence.** The formats a machine of the mixed-arch template prints (`ACCESSED`/`UNMODELLED`, `POLL`, `patch applied`/`PATCH-REFUSED`, `REHOST-RX`, the warm-reset line) are in the family runbook, step S3 |
+| observation | `<workdir>/observation.json`, when it has them: `channels` (`uart_bytes`, `kernel_lines`, `host_lines`), `kernel_alive_evidence`, `guest_reset_signal`, and the log paths `kernel_log` (`07_logs/kernel_N.log`) and `host_log` (`07_logs/host_N.txt`), each `null` when the round produced none |
+
+The pipeline also puts these lines on your prompt: `Observation channels:` (UART only, or
+UART + memory dump), `Rungs observed so far:`, `Surface: none - ...` (the ladder has no
+surface rung; a stop at a console prompt is not a missing rung), and, when it applies, the
+paragraph that begins `guest_reset_signal is true and kernel_alive was NOT reached`. For that
+last one the pipeline derives rather than fixes: it runs a derive-only escalation
+(`escalate-<N>-reset`) instead of asking a fixer, so a `guest_reset_after_jump` classification
+needs no ranking.
 
 ## Before naming anything: did our input reach the gate?
 
@@ -61,13 +73,22 @@ evidence of anything - classify the round on its actual stop point.
 
 Some rows in the knowledge tables read **build layer** in the owning-fixer column.
 Those are premises the machine was built on - `has_el3`, the entry exception
-level, entry PC, load address, the memory skeleton - and no fixer can reach them.
+level, entry PC, load address, the memory skeleton, the CPU type and the order the
+CPUs are created in - and no fixer can reach them.
 
 When the fingerprint matches one, name it and set `layer: "build"` with an empty
 `fixer_ranking`. Do not rank a fixer anyway to be helpful: a fixer handed a
 build-layer fault can only produce a band-aid that changes nothing, and a run of
 those is indistinguishable from progress until sixty rounds have passed.
-| registry | `fixers/registry.yaml` - fault name to owning fixer |
+
+## Channels - when the observation has more than the UART
+
+| what you see | what it means |
+|---|---|
+| `channels.kernel_lines > 0` while `uart_bytes` is small | the kernel is running and logging into the memory-dump channel. That is **not** `console_silent` - that name means 0 bytes of console and 0 exceptions for the whole run |
+| `kernel_alive_evidence` is set | the kernel's own line was observed in a guest channel; report `kernel_alive` as reached and **note which channel and whether the banner itself was seen** |
+| `host_lines` / lines starting `qemu-system-aarch64:` | our own machine talking. They may point you at a stop point; they are **never evidence that the guest reached anything**. Do not quote one as `evidence` for a reached milestone |
+| `guest_reset_signal: true` | a reset or watchdog block was touched after the kernel jump. It supports the **hypothesis** `guest_reset_after_jump` in the family table - name it with low confidence, no fixer, and say it is unconfirmed |
 
 ## Method
 
@@ -114,11 +135,20 @@ that is a polling hang, not an abort.
 
 plus **`unknown`** when nothing fits.
 
+A family table adds its own names (MediaTek: `faults_mediatek.md` and the eMMC
+section of `faults_storage.md`). A name is usable only if the registry lists it under
+a fixer's `handles` or under `build_layer`; a name the registry does not list goes
+to static-analyzer, never to a fixer you pick yourself.
+
 ## Ranking the fixers
 
 One stop point may have several candidate owners. List them all, ranked.
-**Only the first-ranked fixer runs this round**; the rest stay queued for later,
-because a round carries exactly one change.
+The pipeline asks **up to three candidates in order**: the supervisor's
+`prescribed_fixer` first, then your ranking, then the owner named in the derived
+table of `STATIC.md`. The first one that makes a change runs; a fixer that declines
+(`not_mine` or `no_new_change`) hands the round to the next. A round still carries
+exactly one change. So ranks 2 and 3 are real - they are asked when rank 1 declines -
+and a fixer you leave out of the ranking is never asked.
 
 Rank by:
 1. Which fixer's ownership table the log signature matches most precisely
@@ -133,13 +163,23 @@ should suspect an existing bypass's side effects before adding a new one.
 If the run reached a milestone, report it in `milestone_reached` instead of a
 category.
 
-| 등급 | rungs |
-|---|---|
-| 1 (bootloader) | the surface — `shell` or `fastboot` — then `commands`, then `autoboot` |
-| 2 (kernel) | `userspace`, `rootfs`, `link_up`, `power_mode`, `scsi_attach`, `partitions_up`, `super_mounted` |
+The ladder is built by `goalsFor()` in `workflows/pipeline.js`, in this order; the prompt's
+`Rungs observed so far:` line is the live record of which ones were observed.
 
-The first surface rung is whichever surface this bootloader actually has, so a
-MediaTek LK run reports `fastboot` where an S-Boot run reports `shell`.
+| group | rungs |
+|---|---|
+| stage entries | one `<stage>_entry` rung per runnable stage in `stage_map.json` - the count and the names are derived, so they differ per firmware |
+| surface (optional) | `shell` or `fastboot`, whichever this bootloader actually has; **no rung at all** when it has none |
+| bootloader tail (F2) | `medium_up`, `partitions`, `verify_ok`, `kernel_entry`, `kernel_alive` |
+| kernel (F3) | `userspace`, `partitions_up`, and `super_mounted` only for a firmware that ships a super image |
+
+A bootloader may have **no surface** (a MediaTek LK that logs and boots on without input):
+the ladder then goes from the stage entries straight to `medium_up`, and `autoboot` is
+recorded as an observed fact, not as a rung. `kernel_entry` (the bootloader's own line before
+the jump) and `kernel_alive` (the kernel's own line) are different rungs. `kernel_alive` may be
+observed in the memory-dump channel instead of the UART. A name that is not in this table
+(`commands`, `rootfs`, `link_up`, `power_mode`, `scsi_attach` and the like) is not a rung of
+this ladder: report no `milestone_reached` for it.
 
 But when `fingerprint.json` has `source_gate.injected == true`, **nothing was
 reached** - our machine printed that string. Keep classifying the stop point and
@@ -147,13 +187,16 @@ note the self-injection.
 
 ## Output (JSON)
 
+Shape only (example of the shape from one device - the values are not yours, derive them from
+your target):
+
 ```json
 {
   "category": "pwrmode_timeout",
   "confidence": "high",
   "milestone_reached": null,
   "evidence": {
-    "log_ref": "07_logs/kboot_12.summary.txt:41",
+    "log_ref": "07_logs/run_12.summary.txt:41",
     "line": "ufshcd: change_power_mode failed -110"
   },
   "novelty": { "is_novel": false, "why": null },

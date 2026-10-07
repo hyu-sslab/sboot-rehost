@@ -13,6 +13,11 @@
 #   to report on the bridge itself, so it inspects the Windows side first and
 #   only then hops over to probe the Linux toolchain.
 #
+#   환경 매니페스트 비교(C10): plugin 루트의 env_manifest.json 이 요구, ~/.sboot/env.json 이
+#   현재다. 옛 QEMU 나 출처 불명의 트리로 진행하지 않게, 어긋나면 problems 에 올리고
+#   /sboot-rehost:init 을 안내한다. 비교 자체는 clean_env.sh --status 가 한다 (init 도 같은
+#   판정을 쓰므로 한 곳에 둔다). QEMU 를 환경변수로 직접 지정했으면 비교하지 않는다.
+#
 # Usage:  check_env.sh <workdir> [track]
 # Output: JSON on stdout. ok=false means the run must not start.
 
@@ -41,6 +46,8 @@ WD="${1:-}"
 # the bootloader assembles a DTB for the kernel it loads, so it is needed
 # whenever the target goes past the bootloader.
 TARGET="$(printf '%s' "${2:-F2}" | tr '[:lower:]' '[:upper:]')"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+QEMU_GIVEN="${QEMU:-}"
 QEMU="${QEMU:-$HOME/qemu-build/qemu-10.2.2/build/qemu-system-aarch64}"
 
 problems=""
@@ -78,20 +85,58 @@ if [ "$TARGET" != "F1" ]; then
         || add "dtc/fdtdump 가 없습니다 (DTB 파싱에 필요 — 목표 $TARGET 은 커널 구간을 포함합니다)"
 fi
 
+# --- 환경 매니페스트 비교 (C10) ----------------------------------------------
+ENV_STATUS=""
+if [ -n "$QEMU_GIVEN" ]; then
+    ENV_STATUS='{"status":"skipped","reasons":["QEMU 환경변수로 바이너리를 직접 지정해 환경 매니페스트 비교를 건너뜁니다"]}'
+elif [ -f "$HERE/clean_env.sh" ]; then
+    ENV_STATUS="$(bash "$HERE/clean_env.sh" --status 2>/dev/null)" || ENV_STATUS=""
+fi
+
 emit_with_python() {
-    python3 - "$KERNEL" "$problems" "$WSL" <<'PY'
+    python3 - "$KERNEL" "$problems" "$WSL" "$ENV_STATUS" <<'PY'
 import json, sys
-kernel, raw, wsl = sys.argv[1], sys.argv[2], sys.argv[3] == "true"
+kernel, raw, wsl, env_raw = sys.argv[1], sys.argv[2], sys.argv[3] == "true", sys.argv[4]
 problems = [p for p in raw.split("|") if p]
-print(json.dumps({
+manifest_problem = False
+try:
+    env = json.loads(env_raw) if env_raw else None
+except ValueError:
+    env = None
+if env is not None and env.get("status") not in ("ok", "skipped"):
+    manifest_problem = True
+    status = env.get("status")
+    why = "; ".join(env.get("reasons") or []) or "환경 매니페스트와 어긋납니다"
+    label = {"missing": "이 플러그인이 만든 QEMU 환경이 없습니다",
+             "unmarked": "QEMU 트리가 이 플러그인이 만든 것이 아닙니다(표지 없음)",
+             "stale": "QEMU 환경이 요구보다 낡았습니다",
+             "incomplete": "QEMU 빌드가 끝나지 않았습니다"}.get(status, "환경 매니페스트를 확인하지 못했습니다")
+    problems.append("%s — %s" % (label, why))
+if env is not None:
+    for o in env.get("pip_outdated") or []:
+        manifest_problem = True
+        if o.get("installed"):
+            problems.append("python 모듈 %s %s 가 최소 버전 %s 에 못 미칩니다" % (o["name"], o["installed"], o["min"]))
+        elif not any(o["name"] in p for p in problems):   # capstone 은 위에서 이미 점검했다
+            problems.append("python 모듈 %s 가 없습니다 (필요 >= %s)" % (o["name"], o["min"]))
+hint = ""
+if problems:
+    hint = ("필요한 도구는 /sboot-rehost:init 이 설치합니다. "
+            "직접 설치하려면 scripts/setup_env.sh 를 참고하세요.")
+if manifest_problem:
+    hint += (" 환경 매니페스트 불일치는 /sboot-rehost:init 을 실행하세요"
+             " (QEMU 를 다시 만들면 약 18 분).")
+out = {
     "ok": not problems,
     "os": kernel,
     "wsl": wsl,
     "problems": problems,
-    "hint": ("필요한 도구는 /sboot-rehost:init 이 설치합니다. "
-             "직접 설치하려면 scripts/setup_env.sh 를 참고하세요."
-             if problems else ""),
-}, ensure_ascii=False))
+    "hint": hint,
+}
+if env is not None:
+    out["env_manifest"] = {k: env.get(k) for k in
+                           ("status", "reasons", "required", "current", "pip_outdated") if k in env}
+print(json.dumps(out, ensure_ascii=False))
 PY
 }
 

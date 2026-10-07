@@ -11,6 +11,12 @@ name: exynos
 description: search hints for the Samsung Exynos family
 extends: generic
 
+# The family kit: scripts/family_kit.py reads these two flat keys. Exynos has no
+# family-only knowledge table or runbook - its guidance lives in the common
+# tables, the goal ladder and the fixer prompts.
+knowledge: []
+runbook: ""
+
 chain:
   container_format: varies
   container_notes:
@@ -73,7 +79,7 @@ surface:
 
 verified_boot:
   scheme: avb
-  keywords: [libavb, avb_main, vbmeta, "PO_AVB_KEY", hashtree, rollback,
+  keywords: [libavb, avb_main, vbmeta, "PO_AVB_KEY", hashtree, rollback, keystorage,
              load_and_verify_hash_partition]
   companion_files:
     - keystorage.bin       # SLSI-magic key store; look for an `avbtool` string

@@ -15,9 +15,9 @@ bl3*
 
 # ────────────────────────────────────────────────────────────────
 # 펌웨어·작업 폴더 — 어디에 생기든 전부 무시 (인라인 주석 금지: gitignore 미지원).
-# 플러그인 저장소 폴더 안에서 /rehost-* 를 돌려도 아래는 절대 커밋되지 않는다.
+# 플러그인 저장소 폴더 안에서 /sboot-rehost:start 를 돌려도 아래는 절대 커밋되지 않는다.
 #   rehost_workspaces/ = 펌웨어별 격리 워크스페이스, rehost_exports/ = 공유 키트,
-#   _inbox/ = 드롭 폴더, fw/ = 트랙 2 부팅 자산.
+#   _inbox/ = 드롭 폴더, fw/ = 부팅 자산(커널 자산과 합성 매체).
 # ────────────────────────────────────────────────────────────────
 rehost_workspaces/
 rehost_exports/
@@ -32,24 +32,29 @@ fw/
 07_logs/
 08_docs/
 10_reproduce/
-INPUT.md
-STATIC.md
-STUBS.md
-KERNEL_STATIC.md
-PROGRESS.md
-VERIFICATION.md
-JOURNAL.md
-ANALYSIS.md
-fixer_candidates.md
+# 워크스페이스 문서. 워크스페이스는 rehost_workspaces/<id>/ 아래에 만들어지고 그 폴더는 위에서 통째로
+# 무시한다. 여기서는 저장소 루트를 작업 폴더로 쓴 경우만 막으면 되므로 루트에 고정한다. 이름만 쓰면
+# 어느 폴더의 같은 이름 파일도 가려지고(대소문자를 가리지 않는 파일시스템에서는 verification.md 까지),
+# 이미 추적 중인 파일(예: examples/s921n-exynos2400/INPUT.md)이 무시 목록에 걸린다.
+/INPUT.md
+/STATIC.md
+/STUBS.md
+/KERNEL_STATIC.md
+/PROGRESS.md
+/VERIFICATION.md
+/JOURNAL.md
+/ANALYSIS.md
+/fixer_candidates.md
 new_example/
 
 # 워크스페이스 루트에 회차마다 쌓이는 관측·측정 산출물.
-# 위의 문서 목록과 같은 이유로 둔다 — 저장소 폴더 안에서 /rehost-* 를 돌렸을 때
+# 위의 문서 목록과 같은 이유로 둔다 — 저장소 폴더 안에서 /sboot-rehost:start 를 돌렸을 때
 # 펌웨어 도출값이 커밋되지 않게 하는 방어선이다.
 input_plan.json
 input_summary.json
 storage_tokens.txt
 milestone_tokens.txt
+kernel_task_regex.txt
 fingerprint.json
 fingerprint.prev.json
 observation.json
@@ -63,6 +68,7 @@ analysis.json
 # ────────────────────────────────────────────────────────────────
 examples/*
 !examples/s921n-exynos2400
+!examples/a136u-mt6833
 
 # ────────────────────────────────────────────────────────────────
 # 빌드·런타임·에디터
@@ -106,6 +112,10 @@ _design/
 # ────────────────────────────────────────────────────────────────
 another_log/
 bug_repair/
+
+# 사용자가 펌웨어를 받아 두고 분석하는 로컬 폴더. 지금까지는 안의 파일 형식(*.zip 등)이 무시 목록에 걸려
+# 폴더째 무시됐는데, 위의 문서 이름을 루트에 고정한 뒤에는 그 폴더 안의 문서가 걸리지 않으므로 폴더를 명시한다.
+analyze/
 
 
 # ────────────────────────────────────────────────────────────────

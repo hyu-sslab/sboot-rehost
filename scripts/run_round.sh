@@ -15,6 +15,25 @@
 # Output:
 #   <workdir>/observation.json   (also printed to stdout)
 #
+# The keys that point at this round's channel logs (workflows/pipeline.js RUN_SCHEMA and the
+# agent prompts name them; every path is absolute and belongs to THIS round):
+#   console          07_logs/console_<N>.txt   the guest's UART, guest lines only
+#   kernel_log       07_logs/kernel_<N>.log    the kernel log the host read out of RAM, one
+#                                              "<kernel_s> <text>" line per entry (GUEST
+#                                              evidence). A path only when memdump_plan.json was
+#                                              valid and the observer produced the file; null
+#                                              otherwise - null means "no such channel this
+#                                              round", never "the kernel said nothing".
+#   host_log         07_logs/host_<N>.txt      QEMU's and the machine's own lines ("qemu-system-*:
+#                                              ...": ACCESSED / UNMODELLED / POLL / ...), never
+#                                              guest evidence. A path whenever the round produced
+#                                              such a line (no plan needed) or a channel was on;
+#                                              null when the machine said nothing.
+#   channels         {uart_bytes, kernel_lines, host_lines}   the line counts behind the paths
+#   task_regex       the task-line shape that judged the memory-dump channel ({pattern, custom,
+#                    rejected, ...}); null when no memory-dump scan ran. A custom shape that
+#                    decided kernel_alive is also named in kernel_alive_evidence.task_shape.
+#
 # Steps: journal try-start -> change snapshot -> run -> stop conditions -> merge.
 
 set -u
@@ -55,12 +74,27 @@ def load(path, default):
     except (OSError, ValueError):
         return default
 
+def path_or_none(value):
+    """A log path the fingerprint named, only while the file is there: a path to a file
+    that does not exist would send the reader to nothing and read as "the channel was silent"."""
+    return value if isinstance(value, str) and value and os.path.isfile(value) else None
+
 fp = load(os.path.join(wd, "fingerprint.json"), {})
 stop = load(stop_path, {})
 
 gate = fp.get("source_gate") or {}
 origin = fp.get("origin") or {}
 inp = fp.get("input") or {}
+chan = fp.get("channels") or {}
+kern = fp.get("kernel") or {}
+
+# What kernel_alive rests on. A memory-dump hit carries its own evidence (kernel time,
+# the task that printed it, whether the banner was seen). A UART-only rung is the
+# older string match and says so: nothing about it was held to a kernel timestamp.
+alive_evidence = kern.get("alive_evidence")
+if alive_evidence is None and "kernel_alive" in (fp.get("milestones_reached") or []):
+    alive_evidence = {"channel": "uart",
+                      "note": "UART 콘솔 토큰 일치 — 커널 시각·태스크 접두는 검증하지 않음"}
 observation = {
     "round": int(run_n),
     "goal": goal,
@@ -107,6 +141,10 @@ observation = {
     "rx_reported": bool(inp.get("rx_reported", False)),
     "rx_served": inp.get("rx_served"),
     "rx_polls": inp.get("rx_polls"),
+    # The firmware sat parked on its console input: nothing new on the console in the
+    # final stretch while the machine's RX poll counter kept growing. null = the machine
+    # does not report RX polls, which is not the same as "not waiting".
+    "waiting_for_input": inp.get("waiting_for_input"),
     "input_summary": inp.get("summary", ""),
     "input_log": inp.get("log", ""),
     # Could this run read the boot medium's partition table? "unknown" means the
@@ -124,6 +162,38 @@ observation = {
     "summary": fp.get("summary", ""),
     "trace": fp.get("trace", ""),
 
+    # Observation channels. The UART is not the only voice a guest has: with a memory
+    # dump the kernel log arrives on its own channel, and QEMU's own diagnostics are
+    # kept apart from both. A channel that is off reads 0, not "unknown".
+    "channels": {
+        "uart_bytes": chan.get("uart_bytes", fp.get("console_bytes", 0)),
+        "kernel_lines": chan.get("kernel_lines", 0),
+        "host_lines": chan.get("host_lines", 0),
+    },
+    # null: no evidence. An object: which line, from which channel, at which kernel time, and
+    # (memory dump) `task_shape`: the task-line shape that decided it - a custom one chosen for
+    # this target is named there and in `note`.
+    "kernel_alive_evidence": alive_evidence,
+    # The task-line shape that judged the memory-dump channel this round, whether or not it
+    # credited kernel_alive: {pattern, custom, rejected} and, for a custom shape, how it behaved
+    # on this ring (total_lines, task_lines, default_task_lines, discriminates,
+    # only_custom_examples). `rejected` = {pattern, problems} when the shape written for this
+    # target was too loose to use and the default judged instead. null = no memory-dump scan.
+    "task_regex": kern.get("task_regex"),
+    # Where this round's kernel and host logs are (null = the file does not exist).
+    "kernel_log": path_or_none(fp.get("kernel_log")),
+    "host_log": path_or_none(fp.get("host_log")),
+    # The guest touched its reset/watchdog block right after the jump (host-line
+    # patterns, see memdump_observe.py reset-signal). False also when nothing was configured.
+    "guest_reset_signal": bool(fp.get("guest_reset_signal", False)),
+    "guest_reset": fp.get("guest_reset"),
+    # Depth of the kernel channel; null when the channel is off or the log is empty.
+    "kernel_last_time": kern.get("last_time"),
+    "kernel_uniq": kern.get("uniq"),
+    "kernel": kern or None,
+    # The run was cut short by the exception threshold (MAX_EXCEPTIONS), not by its timeout.
+    "early_exit": fp.get("early_exit"),
+
     # deterministic stop conditions - copied verbatim, never re-derived
     "stop": bool(stop.get("stop", False)),
     "stop_reason": stop.get("stop_reason"),
@@ -134,6 +204,9 @@ observation = {
     "suspect_prior_bypass": bool(stop.get("suspect_prior_bypass", False)),
     "best_milestone": stop.get("best_milestone"),
     "best_progress": stop.get("best_progress", {}),
+    # The kernel log went deeper than it ever had: the boot is moving even when the
+    # UART fingerprint is constant, so this is not a stall.
+    "kernel_moving": bool(stop.get("kernel_moving", False)),
     "tried_changes": stop.get("tried_changes", []),
     # changes applied that moved nothing - the signal that the diagnosis is at
     # the wrong layer, which is the supervisor's judgement to make
